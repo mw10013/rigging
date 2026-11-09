@@ -1,7 +1,9 @@
 # rigging
 
 `@mw10013/rigging` is the house toolkit for Effect, TypeScript and Vite+ projects. `core` serves
-any project; `cloudflare` and `shopify` are optional layers that load only where an app uses them.
+any project; `cloudflare` is an optional layer that loads only where an app uses it. Shopify dev
+tooling (berth leases, the app's dev and e2e servers, Agent Chrome) lives in
+`@mw10013/shopify-app-workers`, which builds on rigging.
 
 Published on npm: https://www.npmjs.com/package/@mw10013/rigging
 
@@ -16,8 +18,6 @@ pnpm add -D @mw10013/rigging
   plugin that publishes a dev server's port (`core/server-endpoint`).
 - `cloudflare`: stages and environments (`cloudflare/stage`), Alchemy stack helpers
   (`cloudflare/deployed-stack`) and the integration-test setup (`cloudflare/integ-setup`).
-- `shopify`: dev-store leases from berth, the app's dev and e2e servers, Agent Chrome and the
-  embedded-app test helpers.
 
 Import a module by its layer: `import { app } from "@mw10013/rigging/core/app"`. A module the
 package manifest (`src/package.json`) does not export is internal.

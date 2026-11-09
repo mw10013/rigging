@@ -1,6 +1,6 @@
 {
   "name": "rigging-workspace",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Builds, tests and publishes @mw10013/rigging from src/",
   "type": "module",
@@ -22,7 +22,6 @@
     "@mw10013/rigging": "link:src",
     "@types/node": "24.19.2",
     "alchemy": "2.0.0-beta.85",
-    "playwright": "1.64.1",
     "typescript": "7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",

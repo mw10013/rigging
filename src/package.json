@@ -2,7 +2,7 @@
   "name": "@mw10013/rigging",
   "version": "0.0.0-source",
   "private": true,
-  "description": "House toolkit for Effect, TypeScript and Vite+ projects: core plus optional Cloudflare and Shopify layers.",
+  "description": "House toolkit for Effect, TypeScript and Vite+ projects: core plus an optional Cloudflare layer.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -24,16 +24,7 @@
     "./core/lint/conventions": "./core/lint/conventions.ts",
     "./cloudflare/stage": "./cloudflare/stage.ts",
     "./cloudflare/deployed-stack": "./cloudflare/deployed-stack.ts",
-    "./cloudflare/integ-setup": "./cloudflare/integ-setup.ts",
-    "./shopify/agent-chrome": "./shopify/agent-chrome.ts",
-    "./shopify/app-handle": "./shopify/app-handle.ts",
-    "./shopify/berth": "./shopify/berth.ts",
-    "./shopify/embedded-app": "./shopify/embedded-app.ts",
-    "./shopify/local-route": "./shopify/local-route.ts",
-    "./shopify/server": "./shopify/server.ts",
-    "./shopify/stage-store": "./shopify/stage-store.ts",
-    "./shopify/web": "./shopify/web.ts",
-    "./shopify/worktree": "./shopify/worktree.ts"
+    "./cloudflare/integ-setup": "./cloudflare/integ-setup.ts"
   },
   "publishConfig": {
     "access": "public"
@@ -43,7 +34,6 @@
     "@effect/platform-node": "^4.0.5",
     "alchemy": "2.0.0-beta.85",
     "effect": "^4.0.5",
-    "playwright": "^1.64.1",
     "vite": "*",
     "vite-plus": "^1.4.0",
     "vitest": "^5.0.5"
@@ -56,9 +46,6 @@
       "optional": true
     },
     "alchemy": {
-      "optional": true
-    },
-    "playwright": {
       "optional": true
     },
     "vite": {
