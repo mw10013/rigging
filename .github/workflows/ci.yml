@@ -22,3 +22,15 @@ jobs:
       - run: vp check
       - run: vp test run
       - run: vp run build
+      - name: Diagnose the server runner
+        if: failure()
+        run: |
+          d=$(mktemp -d); cd "$d"; git init -q
+          echo '{"name":"x"}' > package.json
+          echo 'console.log("argv1=" + process.argv[1])' > argv.ts
+          vpx ./argv.ts || true
+          echo 'console.error("hi from server")' > s.mjs
+          vpx "$GITHUB_WORKSPACE/src/bin/rigging.ts" server run dev --run 0123abcd -- node s.mjs; echo "exit=$?"
+          ls -laR .rigging || true
+          cat .rigging/servers/dev/log/current || true
+          which vpx vp node; vpx --version || true
