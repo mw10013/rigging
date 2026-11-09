@@ -72,11 +72,12 @@ export const run = Effect.fn("Process.run")(function* (
   return output.stdout;
 });
 
-/** Streams the program's output to stderr, keeping stdout for JSON. */
+/** Streams the program's output to stderr, keeping stdout for JSON. `env` is added to the inherited environment. */
 export const stream = Effect.fn("Process.stream")(function* (
   directory: string,
   program: string,
   args: readonly string[],
+  env?: Readonly<Record<string, string>>,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const command = [program, ...args].join(" ");
@@ -91,6 +92,7 @@ export const stream = Effect.fn("Process.stream")(function* (
           cwd: directory,
           stdin: "ignore",
           extendEnv: true,
+          ...(env === undefined ? {} : { env }),
         }),
       );
       const [_stdout, _stderr, code] = yield* Effect.all(
