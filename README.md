@@ -41,7 +41,8 @@ vp install
 vp check
 vp test run
 vp run build        # dist/: the package as published
-npm publish ./dist  # from a clean, checked main
 ```
 
-The version lives in the root `package.json`.
+The version lives in the root `package.json`. To release, bump it on `main`, then push a tag
+`v<version>`: the Publish workflow checks, tests, builds and runs `npm publish`. CI runs the
+same checks on every push and pull request.
