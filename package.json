@@ -1,0 +1,39 @@
+{
+  "name": "rigging-workspace",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Builds, tests and publishes @mw10013/rigging from src/",
+  "type": "module",
+  "imports": {
+    "#rigging/*": "./src/*",
+    "#scripts/*": "./scripts/*"
+  },
+  "scripts": {
+    "build": "vpx ./scripts/pack.ts",
+    "prepare": "vp config"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.1.2",
+    "effect": "4.1.2"
+  },
+  "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.85",
+    "@effect/vitest": "4.1.2",
+    "@mw10013/rigging": "link:src",
+    "@types/node": "24.19.2",
+    "alchemy": "2.0.0-beta.85",
+    "playwright": "1.64.1",
+    "typescript": "7.0.2",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "24.22.0",
+      "onFail": "ignore"
+    }
+  },
+  "packageManager": "pnpm@12.11.2"
+}

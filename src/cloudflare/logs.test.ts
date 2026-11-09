@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { app } from "#devkit/core/app.ts";
+import { app } from "#rigging/core/app.ts";
 
 import { Event, lineOf, redactUrl } from "./logs.ts";
 

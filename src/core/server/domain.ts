@@ -1,11 +1,11 @@
 /**
  * A server is one long-lived command per checkout and name, run in the
- * foreground by `bosun run`, its runner. Each actor owns its own file under
- * `.bosun/<name>/`, so no two write the same one:
+ * foreground by `rigging server run`, its runner. Each actor owns its own file under
+ * `.rigging/servers/<name>/`, so no two write the same one:
  *
  * - `record.json`: the runner's {@link ServerRecord}, from launch to exit.
  * - `endpoint.json`: the server's {@link Endpoint}, written by the
- *   command itself once it knows its port, through `BOSUN_ENDPOINT`.
+ *   command itself once it knows its port, through `RIGGING_ENDPOINT`.
  *
  * @module
  */
@@ -25,10 +25,10 @@ export type RunId = typeof RunId.Type;
 const Pid = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const ServerRecord = Schema.Struct({
-  bosun: Schema.Literal(1),
+  rigging: Schema.Literal(1),
   name: ServerName,
   run: RunId,
-  /** The runner, `bosun run`. */
+  /** The runner, `rigging server run`. */
   pid: Pid,
   /** The command's process group; the command leads it. */
   group: Pid,
@@ -46,15 +46,15 @@ export type Endpoint = typeof Endpoint.Type;
 export const ServerRecordJson = Schema.fromJsonString(ServerRecord);
 export const EndpointJson = Schema.fromJsonString(Endpoint);
 
-/** bosun owns `.bosun/` in each checkout; its `.gitignore` keeps the folder out of git. */
-export const BOSUN_DIRECTORY = ".bosun";
+/** rigging server owns `.rigging/servers/` in each checkout; its `.gitignore` keeps the folder out of git. */
+export const SERVERS_DIRECTORY = ".rigging/servers";
 
 export const files = (name: ServerName) => ({
-  directory: `${BOSUN_DIRECTORY}/${name}`,
-  record: `${BOSUN_DIRECTORY}/${name}/record.json`,
-  endpoint: `${BOSUN_DIRECTORY}/${name}/endpoint.json`,
-  logDirectory: `${BOSUN_DIRECTORY}/${name}/log`,
-  log: `${BOSUN_DIRECTORY}/${name}/log/current`,
+  directory: `${SERVERS_DIRECTORY}/${name}`,
+  record: `${SERVERS_DIRECTORY}/${name}/record.json`,
+  endpoint: `${SERVERS_DIRECTORY}/${name}/endpoint.json`,
+  logDirectory: `${SERVERS_DIRECTORY}/${name}/log`,
+  log: `${SERVERS_DIRECTORY}/${name}/log/current`,
 });
 
 const MARKER = "====";

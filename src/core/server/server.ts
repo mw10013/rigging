@@ -1,5 +1,5 @@
 /**
- * The runner (`bosun run`) owns three processes, each in its own process
+ * The runner (`rigging server run`) owns three processes, each in its own process
  * group: itself, the server's command, and the `s6-log` that writes its
  * output. A stop signals the command's group alone, so the runner and the
  * logger outlive it, drain its last lines and mark its exit.
@@ -22,7 +22,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import {
-  BOSUN_DIRECTORY,
   type Ending,
   EndpointJson,
   exitMarker,
@@ -34,6 +33,7 @@ import {
   type ServerName,
   type ServerRecord,
   ServerRecordJson,
+  SERVERS_DIRECTORY,
   type ServerState,
   startMarker,
   stateOf,
@@ -114,7 +114,7 @@ export class LoggerExitedError extends Schema.TaggedError<LoggerExitedError>()(
   }
 }
 
-const at = Effect.fn("Bosun.at")(function* (root: string, relative: string) {
+const at = Effect.fn("Server.at")(function* (root: string, relative: string) {
   const path = yield* Path.Path;
   return path.join(root, relative);
 });
@@ -130,7 +130,7 @@ const signal = (pid: number, name: NodeJS.Signals | 0) =>
 
 const groupAlive = (group: number) => signal(-group, 0);
 
-const commandLine = Effect.fn("Bosun.commandLine")(function* (pid: number) {
+const commandLine = Effect.fn("Server.commandLine")(function* (pid: number) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const text = yield* spawner
     .string(
@@ -142,7 +142,7 @@ const commandLine = Effect.fn("Bosun.commandLine")(function* (pid: number) {
   return text.trim();
 });
 
-const output = Effect.fn("Bosun.output")(function* (
+const output = Effect.fn("Server.output")(function* (
   program: string,
   args: readonly string[],
 ) {
@@ -175,7 +175,7 @@ const processTable = output("ps", ["-A", "-o", "pid=,ppid="]).pipe(
   }),
 );
 
-const portListener = Effect.fn("Bosun.portListener")(function* (
+const portListener = Effect.fn("Server.portListener")(function* (
   port: number,
   command: number,
 ) {
@@ -185,7 +185,7 @@ const portListener = Effect.fn("Bosun.portListener")(function* (
 });
 
 /** `pid 61359 (workerd serve …) in /path/to/its/checkout`, for a failure's message. */
-const holderOf = Effect.fn("Bosun.holderOf")(function* (pid: number) {
+const holderOf = Effect.fn("Server.holderOf")(function* (pid: number) {
   const cwd = (yield* output("lsof", [
     "-a",
     "-p",
@@ -200,19 +200,19 @@ const holderOf = Effect.fn("Bosun.holderOf")(function* (pid: number) {
   return `pid ${String(pid)} (${(yield* commandLine(pid)).slice(0, 120)})${cwd === undefined ? "" : ` in ${cwd}`}`;
 });
 
-const runnerAlive = Effect.fn("Bosun.runnerAlive")(function* (
+const runnerAlive = Effect.fn("Server.runnerAlive")(function* (
   record: ServerRecord,
 ) {
   if (!(yield* signal(record.pid, 0))) return false;
   return (yield* commandLine(record.pid)).includes(`--run ${record.run}`);
 });
 
-const readFile = Effect.fn("Bosun.readFile")(function* (file: string) {
+const readFile = Effect.fn("Server.readFile")(function* (file: string) {
   const fs = yield* FileSystem.FileSystem;
   return yield* fs.readFileString(file).pipe(Effect.option);
 });
 
-const readRecord = Effect.fn("Bosun.readRecord")(function* (
+const readRecord = Effect.fn("Server.readRecord")(function* (
   root: string,
   name: ServerName,
 ) {
@@ -220,7 +220,7 @@ const readRecord = Effect.fn("Bosun.readRecord")(function* (
   return Option.flatMap(text, Schema.decodeUnknownOption(ServerRecordJson));
 });
 
-const readEndpoint = Effect.fn("Bosun.readEndpoint")(function* (
+const readEndpoint = Effect.fn("Server.readEndpoint")(function* (
   root: string,
   name: ServerName,
 ) {
@@ -242,7 +242,7 @@ const answering = (port: number) =>
     Effect.orElseSucceed(() => false),
   );
 
-const writeAtomic = Effect.fn("Bosun.writeAtomic")(function* (
+const writeAtomic = Effect.fn("Server.writeAtomic")(function* (
   file: string,
   text: string,
 ) {
@@ -252,7 +252,7 @@ const writeAtomic = Effect.fn("Bosun.writeAtomic")(function* (
   yield* fs.rename(temporary, file);
 });
 
-const removeFiles = Effect.fn("Bosun.removeFiles")(function* (
+const removeFiles = Effect.fn("Server.removeFiles")(function* (
   root: string,
   name: ServerName,
 ) {
@@ -276,7 +276,7 @@ const waitUntil = <E, R>(
     return true;
   });
 
-const logLine = Effect.fn("Bosun.logLine")(function* (
+const logLine = Effect.fn("Server.logLine")(function* (
   root: string,
   name: ServerName,
   line: string,
@@ -312,7 +312,7 @@ const endingOf = (child: ChildProcessSpawner.ChildProcessHandle) =>
     }),
   );
 
-export const run = Effect.fn("Bosun.run")(function* (
+export const run = Effect.fn("Server.run")(function* (
   root: string,
   name: ServerName,
   runId: RunId,
@@ -326,7 +326,7 @@ export const run = Effect.fn("Bosun.run")(function* (
     recursive: true,
   });
   yield* fs.writeFileString(
-    yield* at(root, `${BOSUN_DIRECTORY}/.gitignore`),
+    yield* at(root, `${SERVERS_DIRECTORY}/.gitignore`),
     "*\n",
   );
   yield* removeFiles(root, name);
@@ -338,7 +338,7 @@ export const run = Effect.fn("Bosun.run")(function* (
     ChildProcess.make(program, args, {
       cwd: root,
       env: {
-        BOSUN_ENDPOINT: yield* at(root, files(name).endpoint),
+        RIGGING_ENDPOINT: yield* at(root, files(name).endpoint),
         BOSUN_RUN: runId,
         FORCE_COLOR: undefined,
         NO_COLOR: "1",
@@ -363,7 +363,7 @@ export const run = Effect.fn("Bosun.run")(function* (
   yield* writeAtomic(
     yield* at(root, files(name).record),
     Schema.encodeSync(ServerRecordJson)({
-      bosun: 1,
+      rigging: 1,
       name,
       run: runId,
       pid: process.pid,
@@ -421,7 +421,7 @@ export const run = Effect.fn("Bosun.run")(function* (
 }, Effect.scoped);
 
 export interface StatusJson {
-  readonly bosun: 1;
+  readonly rigging: 1;
   readonly name: string;
   readonly state: ServerState;
   readonly run: string | null;
@@ -438,7 +438,7 @@ export interface StatusJson {
  * only when the command or one of its descendants listens there: anything answers HTTP on a port
  * another process holds.
  */
-const sight = Effect.fn("Bosun.sight")(function* (
+const sight = Effect.fn("Server.sight")(function* (
   root: string,
   name: ServerName,
 ) {
@@ -463,7 +463,7 @@ const sight = Effect.fn("Bosun.sight")(function* (
   const recorded = live ? Option.getOrUndefined(record) : undefined;
   const published = live ? Option.getOrUndefined(endpoint) : undefined;
   const status: StatusJson = {
-    bosun: 1,
+    rigging: 1,
     name,
     state,
     run: recorded?.run ?? null,
@@ -480,7 +480,7 @@ const sight = Effect.fn("Bosun.sight")(function* (
 export const status = (root: string, name: ServerName) =>
   sight(root, name).pipe(Effect.map(({ status }) => status));
 
-const runOutputOf = Effect.fn("Bosun.runOutputOf")(function* (
+const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
   root: string,
   name: ServerName,
   runId: RunId,
@@ -496,7 +496,7 @@ const runOutputOf = Effect.fn("Bosun.runOutputOf")(function* (
   );
 });
 
-const waitAnswering = Effect.fn("Bosun.waitAnswering")(function* (
+const waitAnswering = Effect.fn("Server.waitAnswering")(function* (
   root: string,
   name: ServerName,
   runId: RunId,
@@ -535,7 +535,7 @@ const waitAnswering = Effect.fn("Bosun.waitAnswering")(function* (
   }
 });
 
-const stopRecorded = Effect.fn("Bosun.stopRecorded")(function* (
+const stopRecorded = Effect.fn("Server.stopRecorded")(function* (
   root: string,
   name: ServerName,
   record: ServerRecord,
@@ -555,7 +555,7 @@ const stopRecorded = Effect.fn("Bosun.stopRecorded")(function* (
   yield* removeFiles(root, name);
 });
 
-export const start = Effect.fn("Bosun.start")(function* (
+export const start = Effect.fn("Server.start")(function* (
   root: string,
   name: ServerName,
   command: readonly [string, ...string[]],
@@ -589,7 +589,8 @@ export const start = Effect.fn("Bosun.start")(function* (
     ChildProcess.make(
       "vpx",
       [
-        process.argv[1] ?? "bosun.ts",
+        process.argv[1] ?? "rigging",
+        "server",
         "run",
         name,
         "--run",
@@ -625,7 +626,7 @@ export const start = Effect.fn("Bosun.start")(function* (
   return yield* waitAnswering(root, name, runId, timeout);
 }, Effect.scoped);
 
-export const stop = Effect.fn("Bosun.stop")(function* (
+export const stop = Effect.fn("Server.stop")(function* (
   root: string,
   name: ServerName,
 ) {
@@ -639,7 +640,7 @@ export const stop = Effect.fn("Bosun.stop")(function* (
   return true;
 });
 
-export const logs = Effect.fn("Bosun.logs")(function* (
+export const logs = Effect.fn("Server.logs")(function* (
   root: string,
   name: ServerName,
   lines: number,

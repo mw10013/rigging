@@ -5,11 +5,11 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 
 import {
-  bosunOutput,
   PortTakenError,
   retryPortTaken,
   runningOf,
   ServerError,
+  serverOutput,
   tunnelErrorMessage,
   tunnelServes,
 } from "./server.ts";
@@ -54,7 +54,7 @@ describe("tunnelErrorMessage", () => {
 
 const status = (fields: Record<string, unknown>) =>
   JSON.stringify({
-    bosun: 1,
+    rigging: 1,
     name: "e2e",
     state: "running",
     run: "9df4baf3",
@@ -63,14 +63,14 @@ const status = (fields: Record<string, unknown>) =>
     startedAt: "2026-11-03T14:56:35.734Z",
     port: 50_713,
     url: "https://example.trycloudflare.com",
-    log: ".bosun/e2e/log/current",
+    log: ".rigging/servers/e2e/log/current",
     ...fields,
   });
 
 const running = (stdout: string) =>
-  runningOf(Result.getOrThrow(bosunOutput(["status", "e2e"], stdout)));
+  runningOf(Result.getOrThrow(serverOutput(["status", "e2e"], stdout)));
 
-describe("bosun status", () => {
+describe("rigging server status", () => {
   it("reads a running server's port, tunnel and start", () => {
     assert.deepStrictEqual(
       running(status({})),
@@ -78,7 +78,7 @@ describe("bosun status", () => {
         port: 50_713,
         url: Option.some("https://example.trycloudflare.com"),
         startedAt: Option.some(new Date("2026-11-03T14:56:35.734Z")),
-        log: ".bosun/e2e/log/current",
+        log: ".rigging/servers/e2e/log/current",
       }),
     );
   });
@@ -109,23 +109,23 @@ describe("bosun status", () => {
     );
   });
 
-  it("fails with bosun's message, or names the command when the output is not bosun's", () => {
-    const refused = bosunOutput(
+  it("fails with rigging server's message, or names the command when the output is not rigging server's", () => {
+    const refused = serverOutput(
       ["start", "e2e"],
       JSON.stringify({
-        bosun: 1,
+        rigging: 1,
         error: { _tag: "ServerExitedError", message: "it exited" },
       }),
     );
     assert.isTrue(Result.isFailure(refused));
     if (Result.isFailure(refused))
       assert.strictEqual(refused.failure.message, "it exited");
-    const garbled = bosunOutput(["status", "e2e"], "USAGE\n");
+    const garbled = serverOutput(["status", "e2e"], "USAGE\n");
     assert.isTrue(Result.isFailure(garbled));
     if (Result.isFailure(garbled))
       assert.strictEqual(
         garbled.failure.message,
-        "bosun status e2e printed no status; its stderr says why",
+        "rigging server status e2e printed no status; its stderr says why",
       );
   });
 });
@@ -133,12 +133,12 @@ describe("bosun status", () => {
 const taken = new PortTakenError({ report: "port 49177 is held" });
 
 describe("retryPortTaken", () => {
-  it.effect("reads bosun's PortTakenError as its own failure", () =>
+  it.effect("reads rigging server's PortTakenError as its own failure", () =>
     Effect.sync(() => {
-      const refused = bosunOutput(
+      const refused = serverOutput(
         ["start", "e2e"],
         JSON.stringify({
-          bosun: 1,
+          rigging: 1,
           error: { _tag: "PortTakenError", message: "port 49177 is held" },
         }),
       );

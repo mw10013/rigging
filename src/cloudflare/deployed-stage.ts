@@ -1,7 +1,7 @@
 /**
  * `vp run stage <command> <stage>`: sets up a {@link Deployed} stage's Workers Builds deploys,
  * reports its health, and resets staging. An app runs it as the
- * `devkit-stage` bin: `"stage": "devkit-stage"`.
+ * `rigging stage` command: `"stage": "rigging stage"`.
  *
  * Workers Builds deploys a stage with the app's `deploy:<stage>` script, plain
  * `alchemy deploy --stage <stage> --yes`, from the stage's branch. The stage's values are the
@@ -49,7 +49,7 @@ import {
   checkStageEnv,
   type StageFieldEnv,
   type StageFields,
-} from "#devkit/cloudflare/deployed-stack.ts";
+} from "#rigging/cloudflare/deployed-stack.ts";
 import {
   branchOf,
   Deployed,
@@ -57,9 +57,9 @@ import {
   STAGE_RUN,
   type StageRun,
   workerNameOf,
-} from "#devkit/cloudflare/stage.ts";
-import { app } from "#devkit/core/app.ts";
-import { runCommand } from "#devkit/core/command.ts";
+} from "#rigging/cloudflare/stage.ts";
+import { app } from "#rigging/core/app.ts";
+import { runCommand } from "#rigging/core/command.ts";
 
 class StageError extends Schema.TaggedError<StageError>()("StageError", {
   message: Schema.String,
@@ -613,7 +613,7 @@ const syncVariables = Effect.fn("DeployedStage.syncVariables")(function* (
   const failed = () =>
     new StageError({ message: "cannot write the variables' request body" });
   const directory = yield* fs
-    .makeTempDirectoryScoped({ prefix: "devkit-stage-" })
+    .makeTempDirectoryScoped({ prefix: "rigging-stage-" })
     .pipe(Effect.mapError(failed));
   const body = path.join(directory, "variables.json");
   yield* fs
@@ -1025,7 +1025,7 @@ const resetCommand = Command.make(
   ),
 );
 
-/** `devkit-stage`: the bin's command, run by `bin/stage.ts` through {@link runCli}. */
+/** `rigging stage`: the command `bin/rigging.ts` runs through {@link runCli}. */
 export const command = Command.make("stage").pipe(
   Command.withDescription(
     "Set up, check and reset staging and production's Workers Builds deploys.",

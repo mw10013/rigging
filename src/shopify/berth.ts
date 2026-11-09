@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Stream from "effect/Stream";
 
-import { type App, app } from "#devkit/core/app.ts";
+import { type App, app } from "#rigging/core/app.ts";
 
 import type { WebEnvironment } from "./web.ts";
 

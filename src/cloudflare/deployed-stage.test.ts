@@ -10,7 +10,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { app } from "#devkit/core/app.ts";
+import { app } from "#rigging/core/app.ts";
 
 import {
   canonicalTrigger,
@@ -380,7 +380,7 @@ describe("ensureWebsite", () => {
     );
 
   beforeEach(() => {
-    fakes = fs.mkdtempSync(path.join(os.tmpdir(), "devkit-stage-"));
+    fakes = fs.mkdtempSync(path.join(os.tmpdir(), "rigging-stage-"));
     for (const [name, script] of Object.entries(FAKES))
       fs.writeFileSync(fake(name), script, { mode: 0o755 });
     fs.writeFileSync(fake("scripts.json"), "[]");

@@ -2,7 +2,7 @@
  * `vp run logs`: a {@link Deployed} stage's Worker logs from Workers
  * Observability, one line per event, for both of the app's Workers
  * ({@link workerNameOf}). An app runs it as the
- * `devkit-logs` bin: `"logs": "devkit-logs"`.
+ * `rigging logs` command: `"logs": "rigging logs"`.
  *
  * @module
  */
@@ -19,9 +19,9 @@ import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
-import { Deployed, workerNameOf } from "#devkit/cloudflare/stage.ts";
-import { app } from "#devkit/core/app.ts";
-import { runCommand } from "#devkit/core/command.ts";
+import { Deployed, workerNameOf } from "#rigging/cloudflare/stage.ts";
+import { app } from "#rigging/core/app.ts";
+import { runCommand } from "#rigging/core/command.ts";
 
 class LogsError extends Schema.TaggedError<LogsError>()("LogsError", {
   message: Schema.String,
@@ -355,7 +355,7 @@ const wait = Command.make(
   ),
 );
 
-/** `devkit-logs`: the bin's command, run by `bin/logs.ts` through {@link runCli}. */
+/** `rigging logs`: the command `bin/rigging.ts` runs through {@link runCli}. */
 export const command = Command.make("logs").pipe(
   Command.withDescription(
     "Read staging's or production's Worker logs (website and backend).",

@@ -4,7 +4,7 @@ import path from "node:path";
  * A checkout of this repository is either the main checkout, whose `.git` is
  * the repository, or a linked worktree on any branch, which `wt new` creates
  * under `~/.t3/worktrees/<project>/<name>`. Each checkout has its
- * own `.env`, `.alchemy/`, `.bosun/`, `.state/` and `.test-results/`, and its own berth leases
+ * own `.env`, `.alchemy/`, `.rigging/servers/`, `.state/` and `.test-results/`, and its own berth leases
  * ({@link "./berth.ts"}), so each runs its own dev server, on a port it picks, and
  * its own `shopify app dev` session on its own dev store ({@link StoreName}).
  *
@@ -17,8 +17,8 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   type PerDeveloper,
   PerDeveloperStage,
-} from "#devkit/cloudflare/stage.ts";
-import { runCommand } from "#devkit/core/command.ts";
+} from "#rigging/cloudflare/stage.ts";
+import { runCommand } from "#rigging/core/command.ts";
 
 export class WorktreeError extends Schema.TaggedError<WorktreeError>()(
   "WorktreeError",

@@ -1,12 +1,12 @@
 /**
- * Picks a free localhost port, publishes it to bosun as the server's endpoint and prints it, for
+ * Picks a free localhost port, publishes it to rigging server as the server's endpoint and prints it, for
  * a server that takes its port as an argument and never reports the port it bound: `alchemy dev`
  * serves the app from a proxy whose port stays inside Alchemy. A Vite server publishes itself
- * after it binds, with `bosunEndpoint` from `core/bosun-endpoint.ts`, and needs none of this.
+ * after it binds, with `serverEndpoint` from `core/server-endpoint.ts`, and needs none of this.
  *
  * The port is free when picked, not reserved. The server must bind it strictly, so a process that
  * takes it first fails the start instead of moving the server off the published port. An app
- * runs it as the `devkit-bosun-port` bin: `port=$(devkit-bosun-port)`.
+ * runs it as the `rigging server port` bin: `port=$(rigging server port)`.
  *
  * @module
  */
@@ -41,15 +41,15 @@ const freePort = Effect.callback<number>((resume) => {
   });
 });
 
-/** Writes `{ port, url }` for a free port to the file `BOSUN_ENDPOINT` names, and returns the port. */
+/** Writes `{ port, url }` for a free port to the file `RIGGING_ENDPOINT` names, and returns the port. */
 export const publishFreePort = Effect.gen(function* () {
-  const endpoint = yield* Config.String("BOSUN_ENDPOINT").pipe(
+  const endpoint = yield* Config.String("RIGGING_ENDPOINT").pipe(
     Effect.mapError(
       (cause) =>
         new CliError.UserError({
           cause,
           userMessage:
-            "BOSUN_ENDPOINT is unset: start the server with bosun start",
+            "RIGGING_ENDPOINT is unset: start the server with rigging server start",
         }),
     ),
   );
@@ -62,11 +62,11 @@ export const publishFreePort = Effect.gen(function* () {
   return port;
 });
 
-/** `devkit-bosun-port`: the bin's command, run by `bin/bosun-port.ts` through {@link runCli}. */
-export const command = Command.make("bosun-port", {}, () =>
+/** `rigging server port`: the bin's command, run by `bin/rigging server-port.ts` through {@link runCli}. */
+export const command = Command.make("port", {}, () =>
   publishFreePort.pipe(Effect.flatMap(Console.log)),
 ).pipe(
   Command.withDescription(
-    "Publish a free localhost port to bosun and print it.",
+    "Publish a free localhost port to rigging server and print it.",
   ),
 );

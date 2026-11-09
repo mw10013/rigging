@@ -1,23 +1,25 @@
 {
-  "name": "@mw10013/devkit",
+  "name": "@mw10013/rigging",
   "version": "0.0.0-source",
   "private": true,
+  "description": "House toolkit for Effect, TypeScript and Vite+ projects: core plus optional Cloudflare and Shopify layers.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mw10013/rigging.git"
+  },
   "bin": {
-    "devkit-bosun-port": "./bin/bosun-port.ts",
-    "devkit-logs": "./bin/logs.ts",
-    "devkit-stage": "./bin/stage.ts"
+    "rigging": "./bin/rigging.ts"
   },
   "type": "module",
   "imports": {
-    "#devkit/*": "./*"
+    "#rigging/*": "./*"
   },
   "exports": {
     "./core/app": "./core/app.ts",
     "./core/command": "./core/command.ts",
     "./core/test-runs": "./core/test-runs.ts",
-    "./core/bosun-endpoint": "./core/bosun-endpoint.ts",
-    "./core/release": "./core/release.ts",
+    "./core/server-endpoint": "./core/server-endpoint.ts",
     "./core/lint/rules": "./core/lint/rules.ts",
     "./core/lint/conventions": "./core/lint/conventions.ts",
     "./cloudflare/stage": "./cloudflare/stage.ts",
@@ -32,6 +34,9 @@
     "./shopify/stage-store": "./shopify/stage-store.ts",
     "./shopify/web": "./shopify/web.ts",
     "./shopify/worktree": "./shopify/worktree.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.85",
@@ -63,5 +68,5 @@
       "optional": true
     }
   },
-  "//": "devkit's one manifest. `exports` and `bin` are the public surface, and the build makes one entry for each. A module not listed is internal: it builds as a chunk without a .d.mts, and importing it from outside fails. The built manifest maps each export to {types, default} in dist/ (src/devkit-cli/build.ts). The version lives in release tags."
+  "//": "rigging's one manifest. `exports` and `bin` are the public surface, and the build makes one entry for each. A module not listed is internal: it builds as a chunk without a .d.mts, and importing it from outside fails. The built manifest maps each export to {types, default} in dist/ (scripts/build.ts)."
 }

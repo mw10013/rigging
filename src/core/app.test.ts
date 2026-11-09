@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vite-plus/test";
 import { app, NoAppError } from "./app.ts";
 
 const scratch = fs.realpathSync(
-  fs.mkdtempSync(path.join(os.tmpdir(), "devkit-app-")),
+  fs.mkdtempSync(path.join(os.tmpdir(), "rigging-app-")),
 );
 afterAll(() => {
   fs.rmSync(scratch, { recursive: true, force: true });

@@ -3,8 +3,8 @@ import * as Command from "effect/cli/Command";
 import * as Flag from "effect/cli/Flag";
 /**
  * The CLI. `start` and `status` print one JSON document on stdout
- * ({@link StatusJson}), versioned by `bosun: 1`; human lines go to stderr. A
- * typed failure prints `{ bosun: 1, error: { _tag, message } }` and exits 1.
+ * ({@link StatusJson}), versioned by `rigging: 1`; human lines go to stderr. A
+ * typed failure prints `{ rigging: 1, error: { _tag, message } }` and exits 1.
  * `status` exits 3 when the server is not running.
  *
  * @module
@@ -12,25 +12,20 @@ import * as Flag from "effect/cli/Flag";
 import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 
-import * as Git from "#wt/git.ts";
+import { app, NoAppError } from "#rigging/core/app.ts";
+import { command as port } from "#rigging/core/server/port.ts";
 
 import { RunId, ServerName } from "./domain.ts";
-import * as Bosun from "./server.ts";
+import * as Server from "./server.ts";
 
-export class NotInCheckoutError extends Schema.TaggedError<NotInCheckoutError>()(
-  "NotInCheckoutError",
-  { directory: Schema.String },
-) {
-  override get message() {
-    return `${this.directory} is not inside a git checkout`;
-  }
-}
-
-const appRoot = Git.appRoot(process.cwd()).pipe(
-  Effect.mapError(() => new NotInCheckoutError({ directory: process.cwd() })),
-);
+const appRoot = Effect.try({
+  try: () => app().root,
+  catch: (error) =>
+    error instanceof NoAppError
+      ? error
+      : new NoAppError({ directory: process.cwd() }),
+});
 
 const printJson = (value: unknown) =>
   Console.log(JSON.stringify(value, null, 2));
@@ -46,7 +41,7 @@ const reported = <
     Effect.catch((error) =>
       Effect.gen(function* () {
         yield* printJson({
-          bosun: 1,
+          rigging: 1,
           error: { _tag: error._tag, message: error.message },
         });
         yield* Console.error(`error ${error.message}`);
@@ -76,7 +71,7 @@ const start = Command.make(
     name,
     note,
     timeout: Flag.Int("timeout").pipe(
-      Flag.withDefault(Duration.toSeconds(Bosun.START_TIMEOUT)),
+      Flag.withDefault(Duration.toSeconds(Server.START_TIMEOUT)),
       Flag.withDescription("Seconds to wait for the server to answer"),
     ),
     command: commandArguments,
@@ -87,7 +82,7 @@ const start = Command.make(
         const root = yield* appRoot;
         const [program, ...args] = command;
         yield* printJson(
-          yield* Bosun.start(root, name, [program, ...args], {
+          yield* Server.start(root, name, [program, ...args], {
             note,
             timeout: Duration.seconds(timeout),
           }),
@@ -100,7 +95,7 @@ const start = Command.make(
   ),
   Command.withExamples([
     {
-      command: "bosun start dev -- vp run dev:serve",
+      command: "rigging server start dev -- vp run dev:serve",
       description: "Start or adopt the dev server",
     },
   ]),
@@ -121,7 +116,7 @@ const runCommand = Command.make(
     Effect.gen(function* () {
       const root = yield* appRoot;
       const [program, ...args] = command;
-      const code = yield* Bosun.run(root, name, run, note, [program, ...args]);
+      const code = yield* Server.run(root, name, run, note, [program, ...args]);
       process.exitCode = code;
     }),
 ).pipe(
@@ -133,7 +128,7 @@ const runCommand = Command.make(
 const stop = Command.make("stop", { name }, ({ name }) =>
   reported(
     Effect.gen(function* () {
-      yield* Bosun.stop(yield* appRoot, name);
+      yield* Server.stop(yield* appRoot, name);
     }),
   ),
 ).pipe(
@@ -145,7 +140,7 @@ const stop = Command.make("stop", { name }, ({ name }) =>
 const status = Command.make("status", { name }, ({ name }) =>
   reported(
     Effect.gen(function* () {
-      const now = yield* Bosun.status(yield* appRoot, name);
+      const now = yield* Server.status(yield* appRoot, name);
       yield* printJson(now);
       if (now.state !== "running") process.exitCode = 3;
     }),
@@ -174,14 +169,14 @@ const logs = Command.make(
   ({ name, lines, follow }) =>
     reported(
       Effect.gen(function* () {
-        yield* Bosun.logs(yield* appRoot, name, lines, follow);
+        yield* Server.logs(yield* appRoot, name, lines, follow);
       }),
     ),
 ).pipe(Command.withShortDescription("Print or follow the server's log"));
 
-export const command = Command.make("bosun").pipe(
+export const command = Command.make("server").pipe(
   Command.withDescription(
-    'Run one checkout\'s dev servers detached: start, stop, status and logs. A server publishes its port by writing {"port": n, "url"?: s} to $BOSUN_ENDPOINT.',
+    'Run one checkout\'s dev servers detached: start, stop, status and logs. A server publishes its port by writing {"port": n, "url"?: s} to $RIGGING_ENDPOINT.',
   ),
-  Command.withSubcommands([start, stop, status, logs, runCommand]),
+  Command.withSubcommands([start, stop, status, logs, port, runCommand]),
 );

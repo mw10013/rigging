@@ -1,5 +1,5 @@
 /**
- * How every devkit bin runs its command. It is internal: not in `exports`. A bin is a thin file
+ * How every rigging bin runs its command. It is internal: not in `exports`. A bin is a thin file
  * under `bin/` that hands its module's `command` to {@link runCli}, so a module never runs on
  * import and a test can import it.
  *
@@ -23,9 +23,9 @@ export const runCli = <Name extends string, Input, ContextInput, E>(
     E,
     NodeServices.NodeServices
   >,
+  args: readonly string[] = process.argv.slice(2),
 ): void => {
-  command.pipe(
-    Command.run({ version: "1.0.0" }),
+  Command.runWith(command, { version: "1.0.0" })(args).pipe(
     Effect.catchIf(
       (error) => error instanceof CliError.ShowHelp,
       (help) =>

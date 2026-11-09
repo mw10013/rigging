@@ -7,7 +7,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
-import { STAGE_RUN, StageRun } from "#devkit/cloudflare/stage.ts";
+import { STAGE_RUN, StageRun } from "#rigging/cloudflare/stage.ts";
 
 import {
   alchemyCommandOf,

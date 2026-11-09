@@ -1,7 +1,7 @@
 /**
  * Which environment a server in this checkout serves. The dev and e2e servers both run Shopify
  * CLI's one web command (`shopify.web.toml`), so `SANDBOX_ENVIRONMENT` in the session's
- * environment tells them apart: unset is `dev`, and each server's bosun command sets it ({@link "./server.ts"}).
+ * environment tells them apart: unset is `dev`, and each server's rigging server command sets it ({@link "./server.ts"}).
  *
  * @module
  */

@@ -15,7 +15,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import { chromium } from "playwright";
 
-import { runCommand } from "#devkit/core/command.ts";
+import { runCommand } from "#rigging/core/command.ts";
 
 export class AgentChromeError extends Schema.TaggedError<AgentChromeError>()(
   "AgentChromeError",

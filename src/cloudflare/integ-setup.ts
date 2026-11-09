@@ -18,12 +18,12 @@ import path from "node:path";
 
 import type { TestProject } from "vite-plus/test/node";
 
-import { app } from "#devkit/core/app.ts";
+import { app } from "#rigging/core/app.ts";
 import {
   describeOrphan,
   orphansIn,
   stopOrphans,
-} from "#devkit/core/orphans.ts";
+} from "#rigging/core/orphans.ts";
 
 export default function setup(project: TestProject) {
   const { root, name } = app(project.config.root);

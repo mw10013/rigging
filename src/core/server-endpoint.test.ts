@@ -5,13 +5,13 @@ import * as path from "node:path";
 import { createServer } from "vite";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { bosunEndpoint } from "./bosun-endpoint.ts";
+import { serverEndpoint } from "./server-endpoint.ts";
 
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "bosun-endpoint-"));
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "server-endpoint-"));
 const endpoint = path.join(scratch, "endpoint.json");
 
 afterEach(() => {
-  delete process.env.BOSUN_ENDPOINT;
+  delete process.env.RIGGING_ENDPOINT;
   fs.rmSync(endpoint, { force: true });
 });
 
@@ -20,16 +20,16 @@ const serve = async () => {
     root: scratch,
     configFile: false,
     logLevel: "silent",
-    plugins: [bosunEndpoint()],
+    plugins: [serverEndpoint()],
     server: { port: 0, host: "localhost" },
   });
   await server.listen();
   return server;
 };
 
-describe("bosunEndpoint", () => {
-  it("writes the port Vite listens on, and its URL, to BOSUN_ENDPOINT", async () => {
-    process.env.BOSUN_ENDPOINT = endpoint;
+describe("serverEndpoint", () => {
+  it("writes the port Vite listens on, and its URL, to RIGGING_ENDPOINT", async () => {
+    process.env.RIGGING_ENDPOINT = endpoint;
     const server = await serve();
     try {
       const address = server.httpServer?.address();
@@ -43,7 +43,7 @@ describe("bosunEndpoint", () => {
     }
   });
 
-  it("writes nothing outside bosun", async () => {
+  it("writes nothing outside rigging server", async () => {
     const server = await serve();
     await server.close();
     expect(fs.existsSync(endpoint)).toBe(false);

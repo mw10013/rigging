@@ -1,7 +1,7 @@
 /**
- * A Vite plugin that publishes the dev server to bosun: once Vite listens, it writes
- * `{ port, url }` to the file `BOSUN_ENDPOINT` names, so `bosun start` knows where the server
- * answers and Vite keeps choosing its own port. Outside bosun (`BOSUN_ENDPOINT` unset, as under
+ * A Vite plugin that publishes the dev server to rigging server: once Vite listens, it writes
+ * `{ port, url }` to the file `RIGGING_ENDPOINT` names, so `rigging server start` knows where the server
+ * answers and Vite keeps choosing its own port. Outside rigging server (`RIGGING_ENDPOINT` unset, as under
  * Vitest) it does nothing.
  *
  * @module
@@ -10,11 +10,11 @@ import { writeFileSync } from "node:fs";
 
 import type { Plugin } from "vite";
 
-export const bosunEndpoint = (): Plugin => ({
-  name: "devkit:bosun-endpoint",
+export const serverEndpoint = (): Plugin => ({
+  name: "rigging:server-endpoint",
   apply: "serve",
   configureServer(server) {
-    const file = process.env.BOSUN_ENDPOINT;
+    const file = process.env.RIGGING_ENDPOINT;
     if (file === undefined || server.httpServer === null) return;
     const httpServer = server.httpServer;
     httpServer.once("listening", () => {

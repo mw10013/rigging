@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { listenerOf, RunId, runOutput, ServerName, stateOf } from "./domain.ts";
 
-const ENTRY = path.resolve(import.meta.dirname, "../../bosun.ts");
+const ENTRY = path.resolve(import.meta.dirname, "../../bin/rigging.ts");
 
 const FIXTURE = `
 import http from "node:http";
@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 if (process.argv[2] === "crash") { console.log("crashing on purpose"); process.exit(7); }
 if (process.argv[2] === "publish") {
-  writeFileSync(process.env.BOSUN_ENDPOINT, JSON.stringify({ port: Number(process.argv[3]) }));
+  writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port: Number(process.argv[3]) }));
   setInterval(() => {}, 1000);
 } else {
 spawn("sleep", ["600"], { stdio: "ignore" });
@@ -25,13 +25,13 @@ server.listen(0, "127.0.0.1", () => {
   const port = server.address().port;
   console.log("listening on " + port);
   console.error("a stderr line");
-  writeFileSync(process.env.BOSUN_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
+  writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
 });
 if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(() => process.exit(0)); });
 }
 `;
 
-/** What the `bosun` CLI prints: a server's record, or the error a command failed with. */
+/** What `rigging server` prints: a server's record, or the error a command failed with. */
 interface Printed {
   readonly state: string;
   readonly name: string;
@@ -46,8 +46,8 @@ interface Printed {
 
 let checkout: string;
 
-const bosunIn = (cwd: string, ...args: string[]) => {
-  const result = spawnSync("vpx", [ENTRY, ...args], {
+const serverIn = (cwd: string, ...args: string[]) => {
+  const result = spawnSync("vpx", [ENTRY, "server", ...args], {
     cwd,
     encoding: "utf8",
   });
@@ -60,10 +60,13 @@ const bosunIn = (cwd: string, ...args: string[]) => {
   };
 };
 
-const bosun = (...args: string[]) => bosunIn(checkout, ...args);
+const server = (...args: string[]) => serverIn(checkout, ...args);
 
 const log = () =>
-  fs.readFileSync(path.join(checkout, ".bosun/dev/log/current"), "utf8");
+  fs.readFileSync(
+    path.join(checkout, ".rigging/servers/dev/log/current"),
+    "utf8",
+  );
 
 const alive = (pid: number) => {
   try {
@@ -76,40 +79,41 @@ const alive = (pid: number) => {
 
 beforeEach(() => {
   checkout = fs.realpathSync(
-    fs.mkdtempSync(path.join(os.tmpdir(), "bosun-test-")),
+    fs.mkdtempSync(path.join(os.tmpdir(), "rigging-test-")),
   );
   execFileSync("git", ["init", "-q"], { cwd: checkout });
+  fs.writeFileSync(path.join(checkout, "package.json"), `{"name":"app"}`);
   fs.writeFileSync(path.join(checkout, "server.mjs"), FIXTURE);
 });
 
 afterEach(() => {
-  bosun("stop", "dev");
+  server("stop", "dev");
   fs.rmSync(checkout, { recursive: true, force: true });
 });
 
-describe("bosun", () => {
+describe("rigging server", () => {
   it("starts, adopts, reports and stops a server, logging its run", () => {
-    const started = bosun("start", "dev", "--", "node", "server.mjs");
+    const started = server("start", "dev", "--", "node", "server.mjs");
     expect(started.code).toBe(0);
     expect(started.json).toMatchObject({ state: "running", name: "dev" });
     expect(started.json.url).toBe(`http://x.test/${String(started.json.port)}`);
 
-    const adopted = bosun("start", "dev", "--", "node", "server.mjs");
+    const adopted = server("start", "dev", "--", "node", "server.mjs");
     expect(adopted.json.run).toBe(started.json.run);
     expect(adopted.stderr).toContain("adopted");
 
-    expect(bosun("status", "dev").json.state).toBe("running");
-    expect(started.json.log).toBe(".bosun/dev/log/current");
+    expect(server("status", "dev").json.state).toBe("running");
+    expect(started.json.log).toBe(".rigging/servers/dev/log/current");
     expect(
       execFileSync("git", ["status", "--porcelain"], {
         cwd: checkout,
         encoding: "utf8",
       }),
-    ).toBe("?? server.mjs\n");
+    ).toBe("?? package.json\n?? server.mjs\n");
 
-    expect(bosun("stop", "dev").code).toBe(0);
+    expect(server("stop", "dev").code).toBe(0);
     expect(alive(started.json.group)).toBe(false);
-    const after = bosun("status", "dev");
+    const after = server("status", "dev");
     expect(after.code).toBe(3);
     expect(after.json.state).toBe("stopped");
     expect(log()).toContain("a stderr line");
@@ -120,29 +124,32 @@ describe("bosun", () => {
   it("keeps a monorepo app's servers in that app's folder", () => {
     const app = path.join(checkout, "apps/x");
     fs.mkdirSync(path.join(app, "src"), { recursive: true });
-    fs.writeFileSync(path.join(checkout, "package.json"), "{}\n");
-    fs.writeFileSync(path.join(app, "package.json"), "{}\n");
+    fs.writeFileSync(path.join(checkout, "package.json"), `{"name":"root"}`);
+    fs.writeFileSync(path.join(app, "package.json"), `{"name":"x"}`);
     fs.renameSync(
       path.join(checkout, "server.mjs"),
       path.join(app, "server.mjs"),
     );
     const inSrc = path.join(app, "src");
 
-    const started = bosunIn(inSrc, "start", "dev", "--", "node", "server.mjs");
+    const started = serverIn(inSrc, "start", "dev", "--", "node", "server.mjs");
     expect(started.code).toBe(0);
-    expect(started.json.log).toBe(".bosun/dev/log/current");
-    expect(bosunIn(app, "status", "dev").json.state).toBe("running");
-    expect(bosun("status", "dev").json.state).toBe("stopped");
-    expect(fs.existsSync(path.join(checkout, ".bosun"))).toBe(false);
+    expect(started.json.log).toBe(".rigging/servers/dev/log/current");
+    expect(serverIn(app, "status", "dev").json.state).toBe("running");
+    expect(server("status", "dev").json.state).toBe("stopped");
+    expect(fs.existsSync(path.join(checkout, ".rigging"))).toBe(false);
 
-    expect(bosunIn(inSrc, "stop", "dev").code).toBe(0);
+    expect(serverIn(inSrc, "stop", "dev").code).toBe(0);
     expect(
-      fs.readFileSync(path.join(app, ".bosun/dev/log/current"), "utf8"),
+      fs.readFileSync(
+        path.join(app, ".rigging/servers/dev/log/current"),
+        "utf8",
+      ),
     ).toContain(`==== dev exit run=${started.json.run} code=0`);
   }, 60_000);
 
   it("logs the exit of a server that SIGTERM ends without its own handler", () => {
-    const started = bosun(
+    const started = server(
       "start",
       "dev",
       "--",
@@ -151,15 +158,15 @@ describe("bosun", () => {
       "no-handler",
     );
     expect(started.code).toBe(0);
-    expect(bosun("stop", "dev").code).toBe(0);
+    expect(server("stop", "dev").code).toBe(0);
     expect(log()).toContain(
       `==== dev exit run=${started.json.run} signal=SIGTERM`,
     );
-    expect(bosun("status", "dev").json.state).toBe("stopped");
+    expect(server("status", "dev").json.state).toBe("stopped");
   }, 60_000);
 
   it("fails a start whose server exits, with that run's output", () => {
-    const crashed = bosun("start", "dev", "--", "node", "server.mjs", "crash");
+    const crashed = server("start", "dev", "--", "node", "server.mjs", "crash");
     expect(crashed.code).toBe(1);
     expect(crashed.json.error._tag).toBe("ServerExitedError");
     expect(crashed.json.error.message).toContain("crashing on purpose");
@@ -168,7 +175,7 @@ describe("bosun", () => {
 
   it("fails a start whose published port another process holds, and stops the server", async () => {
     const elsewhere = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), "bosun-holder-")),
+      fs.mkdtempSync(path.join(os.tmpdir(), "rigging-holder-")),
     );
     const holder = spawn(
       "node",
@@ -184,7 +191,7 @@ describe("bosun", () => {
           resolve(chunk.toString().trim());
         });
       });
-      const taken = bosun(
+      const taken = server(
         "start",
         "dev",
         "--",
@@ -200,7 +207,7 @@ describe("bosun", () => {
         `pid ${String(holder.pid)} (node -e`,
       );
       expect(taken.json.error.message).toContain(` in ${elsewhere}`);
-      expect(bosun("status", "dev").json.state).toBe("stopped");
+      expect(server("status", "dev").json.state).toBe("stopped");
     } finally {
       holder.kill();
       fs.rmSync(elsewhere, { recursive: true, force: true });
@@ -208,11 +215,11 @@ describe("bosun", () => {
   }, 60_000);
 
   it("stops an orphaned server before starting a new one", () => {
-    const started = bosun("start", "dev", "--", "node", "server.mjs");
+    const started = server("start", "dev", "--", "node", "server.mjs");
     process.kill(started.json.pid, "SIGKILL");
-    expect(bosun("status", "dev").json.state).toBe("orphaned");
+    expect(server("status", "dev").json.state).toBe("orphaned");
 
-    const restarted = bosun("start", "dev", "--", "node", "server.mjs");
+    const restarted = server("start", "dev", "--", "node", "server.mjs");
     expect(restarted.json.state).toBe("running");
     expect(restarted.json.run).not.toBe(started.json.run);
     expect(alive(started.json.group)).toBe(false);
@@ -245,7 +252,7 @@ describe("runOutput", () => {
 
 describe("stateOf", () => {
   const record = Option.some({
-    bosun: 1 as const,
+    rigging: 1 as const,
     name: ServerName.make("dev"),
     run: RunId.make("0123abcd"),
     pid: 10,

@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { app } from "#devkit/core/app.ts";
+import { app } from "#rigging/core/app.ts";
 
 import { type Server, ServerError, step, stopServer } from "./server.ts";
 import type { WebEnvironment } from "./web.ts";

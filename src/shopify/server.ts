@@ -3,10 +3,10 @@ import { Resolver } from "node:dns/promises";
 import path from "node:path";
 
 /**
- * This checkout's dev and e2e servers. bosun runs each (`~/projects/tools/docs/bosun.md`): one
- * Shopify CLI `app dev` per environment, detached, logged to `.bosun/<environment>/log/current`. The
- * CLI picks the port and opens the tunnel; the web command (`dev:alchemy`) publishes both to bosun,
- * so every script that needs the server asks bosun where it is ({@link runningServer}).
+ * This checkout's dev and e2e servers. rigging server runs each (`docs/server.md` in rigging): one
+ * Shopify CLI `app dev` per environment, detached, logged to `.rigging/servers/<environment>/log/current`. The
+ * CLI picks the port and opens the tunnel; the web command (`dev:alchemy`) publishes both to rigging server,
+ * so every script that needs the server asks rigging server where it is ({@link runningServer}).
  *
  * @module
  */
@@ -24,7 +24,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { type App, app } from "#devkit/core/app.ts";
+import { type App, app } from "#rigging/core/app.ts";
 
 import * as Berth from "./berth.ts";
 import type { WebEnvironment } from "./web.ts";
@@ -213,28 +213,28 @@ export const loadServer = Effect.fn("Server.loadServer")(function* (
   } satisfies Server;
 });
 
-const BosunState = Schema.Literals([
+const ServerState = Schema.Literals([
   "running",
   "starting",
   "stopped",
   "orphaned",
 ]);
 
-const BosunStatus = Schema.Struct({
-  state: BosunState,
+const ServerStatus = Schema.Struct({
+  state: ServerState,
   port: Schema.NullOr(Schema.Int),
   url: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
   log: Schema.String,
 });
-export type BosunStatus = typeof BosunStatus.Type;
+export type ServerStatus = typeof ServerStatus.Type;
 
-const BosunFailure = Schema.Struct({
+const ServerFailure = Schema.Struct({
   error: Schema.Struct({ _tag: Schema.String, message: Schema.String }),
 });
 
 /**
- * bosun refused the start: another process holds the port the server published. Shopify CLI
+ * rigging server refused the start: another process holds the port the server published. Shopify CLI
  * probes a free port, releases it and hands it to the web command, which binds it later, so
  * another process can take it in between. A new start gets a new port.
  */
@@ -247,15 +247,17 @@ export class PortTakenError extends Schema.TaggedError<PortTakenError>()(
   }
 }
 
-const decodeBosunOutput = Schema.decodeUnknownResult(
-  Schema.fromJsonString(Schema.Union([BosunStatus, BosunFailure])),
+const decodeServerOutput = Schema.decodeUnknownResult(
+  Schema.fromJsonString(Schema.Union([ServerStatus, ServerFailure])),
 );
 
-export const bosunOutput = (args: readonly string[], stdout: string) => {
-  const output = decodeBosunOutput(stdout);
+export const serverOutput = (args: readonly string[], stdout: string) => {
+  const output = decodeServerOutput(stdout);
   if (Result.isFailure(output))
     return Result.fail(
-      fail(`bosun ${args.join(" ")} printed no status; its stderr says why`),
+      fail(
+        `rigging server ${args.join(" ")} printed no status; its stderr says why`,
+      ),
     );
   const value = output.success;
   if (!("error" in value)) return Result.succeed(value);
@@ -269,7 +271,7 @@ export const bosunOutput = (args: readonly string[], stdout: string) => {
 /** Starts after the first whose port was taken. */
 const PORT_TAKEN_RETRIES = 2;
 
-/** Starts again while bosun refuses a start because another process took its port. */
+/** Starts again while rigging server refuses a start because another process took its port. */
 export const retryPortTaken = <A, E, R>(
   start: Effect.Effect<A, E | PortTakenError, R>,
 ) =>
@@ -285,13 +287,18 @@ export const retryPortTaken = <A, E, R>(
     }),
   );
 
-const bosun = Effect.fn("Server.bosun")(function* (args: readonly string[]) {
+/** The app's own `rigging` bin, so the server runs under the version the app pinned. */
+const riggingBin = () => path.join(app().root, "node_modules/.bin/rigging");
+
+const riggingServer = Effect.fn("Server.riggingServer")(function* (
+  args: readonly string[],
+) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const notFound = () =>
-    fail("bosun did not run: install its shim, ~/.local/bin/bosun");
+    fail("rigging server did not run: install @mw10013/rigging in this app");
   const handle = yield* spawner
     .spawn(
-      ChildProcess.make("bosun", [...args], {
+      ChildProcess.make(riggingBin(), ["server", ...args], {
         cwd: app().root,
         stdin: "ignore",
         stderr: "inherit",
@@ -302,11 +309,11 @@ const bosun = Effect.fn("Server.bosun")(function* (args: readonly string[]) {
     Effect.mapError(notFound),
   );
   yield* handle.exitCode.pipe(Effect.mapError(notFound));
-  return yield* Effect.fromResult(bosunOutput(args, stdout));
+  return yield* Effect.fromResult(serverOutput(args, stdout));
 }, Effect.scoped);
 
 const serverStatus = (environment: WebEnvironment) =>
-  bosun(["status", environment]);
+  riggingServer(["status", environment]);
 
 export interface RunningServer {
   readonly port: number;
@@ -315,7 +322,9 @@ export interface RunningServer {
   readonly log: string;
 }
 
-export const runningOf = (status: BosunStatus): Option.Option<RunningServer> =>
+export const runningOf = (
+  status: ServerStatus,
+): Option.Option<RunningServer> =>
   status.state === "running" && status.port !== null
     ? Option.some({
         port: status.port,
@@ -346,15 +355,17 @@ export const runningServerSync = (
   { root }: App = app(),
 ): RunningServer => {
   const args = ["status", environment];
-  const run = spawnSync("bosun", args, {
+  const run = spawnSync(riggingBin(), ["server", ...args], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
   if (run.error !== undefined)
-    throw new Error("bosun did not run: install its shim");
+    throw new Error(
+      "rigging server did not run: install @mw10013/rigging in this app",
+    );
   const status = Result.getOrThrowWith(
-    bosunOutput(args, run.stdout),
+    serverOutput(args, run.stdout),
     (e) => new Error(e.message),
   );
   return Option.getOrThrowWith(
@@ -386,7 +397,7 @@ export const startServer = Effect.fn("Server.startServer")(function* (
       .pipe(Effect.mapError((error) => fail(error.message)));
   }
   const status = yield* retryPortTaken(
-    bosun([
+    riggingServer([
       "start",
       server.environment,
       "--note",
@@ -415,7 +426,7 @@ export const stopServer = Effect.fn("Server.stopServer")(function* (
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const code = yield* spawner
     .exitCode(
-      ChildProcess.make("bosun", ["stop", environment], {
+      ChildProcess.make(riggingBin(), ["server", "stop", environment], {
         cwd: app().root,
         stdin: "ignore",
         stdout: "ignore",
@@ -424,11 +435,15 @@ export const stopServer = Effect.fn("Server.stopServer")(function* (
     )
     .pipe(
       Effect.mapError(() =>
-        fail("bosun did not run: install its shim, ~/.local/bin/bosun"),
+        fail(
+          "rigging server did not run: install @mw10013/rigging in this app",
+        ),
       ),
     );
   if (code !== ChildProcessSpawner.ExitCode(0))
-    return yield* fail(`bosun stop ${environment} exited ${String(code)}`);
+    return yield* fail(
+      `rigging server stop ${environment} exited ${String(code)}`,
+    );
 });
 
 export const step = Effect.fn("Server.step")(function* <A, E, R>(

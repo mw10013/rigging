@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 declare global {
-  // Alchemy declares the same in `alchemy/Phase`; repeated so devkit type-checks without Alchemy.
+  // Alchemy declares the same in `alchemy/Phase`; repeated so rigging type-checks without Alchemy.
   // oxlint-disable-next-line no-underscore-dangle -- Alchemy's build-time flag
   var __ALCHEMY_RUNTIME__: boolean | undefined;
 }

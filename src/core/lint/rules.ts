@@ -1,13 +1,12 @@
 /**
- * The house lint rule set: what every app applies to its own code and to the devkit it
- * vendors, and what tools applies to `src/devkit`, so devkit is checked by the rules its
- * consumers enforce. An app spreads {@link lint} into its `vite.config.ts` and adds only its own
+ * The house lint rule set: what every project applies to its own code, and what rigging applies to
+ * itself, so rigging is checked by the rules its consumers enforce. An app spreads {@link lint} into its `vite.config.ts` and adds only its own
  * data: `ignorePatterns`, the website's plugins and rules, and its import boundaries.
  *
  * The `conventions` plugin is named by package specifier. A path built from `import.meta.url`
  * would name a `.ts` file the built package does not contain. Oxlint resolves the specifier from
- * the config that spreads {@link lint}, so that config's package depends on `@mw10013/devkit`:
- * an app and the monorepo root install it, and tools links `src/devkit`.
+ * the config that spreads {@link lint}, so that config's package depends on `@mw10013/rigging`:
+ * an app and the monorepo root install it, and rigging's own root links `src`.
  *
  * @module
  */
@@ -216,7 +215,7 @@ export const lint = {
     { name: "vite-plus", specifier: "vite-plus/oxlint-plugin" },
     {
       name: "conventions",
-      specifier: "@mw10013/devkit/core/lint/conventions",
+      specifier: "@mw10013/rigging/core/lint/conventions",
     },
   ],
   overrides: [
