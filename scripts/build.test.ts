@@ -249,6 +249,18 @@ describe("the package as an app installs it", () => {
     });
   });
 
+  it("names an integ globalSetup the installed package resolves", () => {
+    const script = `const { integProject } = await import("@mw10013/rigging/cloudflare/test");
+const [setup] = integProject(() => "test-x").test.globalSetup;
+console.log(typeof (await import(setup)).default);`;
+    expect(
+      execFileSync("node", ["--input-type=module", "--eval", script], {
+        cwd: consumer(),
+        encoding: "utf8",
+      }),
+    ).toBe("function\n");
+  });
+
   it("refuses a module the package does not export", () => {
     for (const internal of [
       "core/orphans",

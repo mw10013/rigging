@@ -18,12 +18,15 @@
   "exports": {
     "./core/app": "./core/app.ts",
     "./core/command": "./core/command.ts",
+    "./core/test": "./core/test.ts",
+    "./core/browser-test": "./core/browser-test.ts",
     "./core/test-runs": "./core/test-runs.ts",
     "./core/server-endpoint": "./core/server-endpoint.ts",
     "./core/lint/rules": "./core/lint/rules.ts",
     "./core/lint/conventions": "./core/lint/conventions.ts",
     "./cloudflare/stage": "./cloudflare/stage.ts",
     "./cloudflare/deployed-stack": "./cloudflare/deployed-stack.ts",
+    "./cloudflare/test": "./cloudflare/test.ts",
     "./cloudflare/integ-setup": "./cloudflare/integ-setup.ts"
   },
   "publishConfig": {
@@ -32,6 +35,7 @@
   "peerDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.85",
     "@effect/platform-node": "^4.0.5",
+    "@vitest/browser-playwright": "^5.0.5",
     "alchemy": "2.0.0-beta.85",
     "effect": "^4.0.5",
     "vite": "*",
@@ -43,6 +47,9 @@
       "optional": true
     },
     "@effect/platform-node": {
+      "optional": true
+    },
+    "@vitest/browser-playwright": {
       "optional": true
     },
     "alchemy": {

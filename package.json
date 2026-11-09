@@ -1,6 +1,6 @@
 {
   "name": "rigging-workspace",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Builds, tests and publishes @mw10013/rigging from src/",
   "type": "module",
@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "vpx ./scripts/pack.ts",
+    "smoke": "vpx ./scripts/smoke.ts",
     "prepare": "vp config"
   },
   "dependencies": {
@@ -21,6 +22,7 @@
     "@effect/vitest": "4.1.2",
     "@mw10013/rigging": "link:src",
     "@types/node": "24.19.2",
+    "@vitest/browser-playwright": "catalog:",
     "alchemy": "2.0.0-beta.85",
     "typescript": "7.0.2",
     "vite": "catalog:",
