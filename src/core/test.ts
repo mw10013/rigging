@@ -58,10 +58,16 @@ const ServerStatus = Schema.fromJsonString(
 
 /**
  * The running server `name` of the app at `root`, from `rigging server status`. It throws when
- * the server is not running, naming its state, so a Playwright config fails at load instead of
- * every test failing to connect. Synchronous, because Playwright loads its config synchronously.
+ * the server is not running, naming its state and `start`, the app's command that starts it
+ * (default `vp run dev` for `dev`, else `vp run <name>:start`), so a Playwright config fails at
+ * load instead of every test failing to connect. Synchronous, because Playwright loads its config
+ * synchronously.
  */
-export const runningServer = (name: string, root: string = process.cwd()) => {
+export const runningServer = (
+  name: string,
+  root: string = process.cwd(),
+  start: string = name === "dev" ? "vp run dev" : `vp run ${name}:start`,
+) => {
   const status = spawnSync("rigging", ["server", "status", name], {
     cwd: root,
     encoding: "utf8",
@@ -75,9 +81,7 @@ export const runningServer = (name: string, root: string = process.cwd()) => {
     status.stdout,
   );
   if (state !== "running" || port === null)
-    throw new Error(
-      `the ${name} server is ${state}: start it with rigging server start ${name}`,
-    );
+    throw new Error(`the ${name} server is ${state}: start it with ${start}`);
   return { port, url, localURL: `http://localhost:${String(port)}` };
 };
 
@@ -91,7 +95,12 @@ export const runningServer = (name: string, root: string = process.cwd()) => {
 export const e2eConfig = ({
   root = process.cwd(),
   server = "e2e",
-}: { readonly root?: string; readonly server?: string } = {}) => {
+  start,
+}: {
+  readonly root?: string;
+  readonly server?: string;
+  readonly start?: string;
+} = {}) => {
   const run = testRunDirectory("e2e", ["results/.last-run.json"], root);
   if (process.env.TEST_WORKER_INDEX === undefined)
     console.log(`e2e results: ${run}`);
@@ -110,7 +119,7 @@ export const e2eConfig = ({
     workers: ci ? 1 : undefined,
     reporter,
     use: {
-      baseURL: runningServer(server, root).localURL,
+      baseURL: runningServer(server, root, start).localURL,
       trace: "retain-on-failure" as const,
     },
   };
