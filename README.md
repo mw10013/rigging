@@ -3,6 +3,8 @@
 `@mw10013/rigging` is the house toolkit for Effect, TypeScript and Vite+ projects. `core` serves
 any project; `cloudflare` and `shopify` are optional layers that load only where an app uses them.
 
+Published on npm: https://www.npmjs.com/package/@mw10013/rigging
+
 ```sh
 pnpm add -D @mw10013/rigging
 ```
