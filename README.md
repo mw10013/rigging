@@ -30,6 +30,8 @@ rigging stage up|check|reset <stage>           # Cloudflare: Workers Builds depl
 rigging logs show|follow|wait <stage>          # Cloudflare: a deployed stage's Worker logs
 ```
 
+`rigging server` rotates each server's log with `s6-log` from s6 (`brew install s6`).
+
 An app calls it from its scripts: `"dev:stop": "rigging server stop dev"`. `docs/server.md` is
 the server contract: the `RIGGING_ENDPOINT` handshake, the status JSON and the
 `.rigging/servers/<name>/` record a tool may read.
@@ -41,7 +43,8 @@ vp install
 vp check
 vp test run
 vp run build        # dist/: the package as published
-npm publish ./dist  # from a clean, checked main
 ```
 
-The version lives in the root `package.json`.
+The version lives in the root `package.json`. To release, bump it on `main`, then push a tag
+`v<version>`: the Publish workflow checks, tests, builds and runs `npm publish`. CI runs the
+same checks on every push and pull request.

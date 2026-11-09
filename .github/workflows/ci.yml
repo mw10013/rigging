@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    # rigging server reads ports with macOS lsof and ps, where the apps run.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # rigging server rotates its logs with s6-log.
+      - run: brew install s6
+      - run: pnpm install --frozen-lockfile
+      # The server tests spawn `vpx` by name.
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: vp check
+      - run: vp test run
+      - run: vp run build

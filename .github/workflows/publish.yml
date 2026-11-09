@@ -1,0 +1,39 @@
+name: Publish
+
+# A pushed tag v<version> publishes that version to npm. npm trusts this
+# workflow (trusted publishing), so the repository stores no npm token.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # rigging server rotates its logs with s6-log.
+      - run: brew install s6
+      - run: pnpm install --frozen-lockfile
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: The tag matches package.json
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          }
+      - run: vp check
+      - run: vp test run
+      - run: vp run build
+      - run: npm install -g npm@latest
+      - run: npm publish ./dist --provenance
