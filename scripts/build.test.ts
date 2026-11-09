@@ -124,6 +124,9 @@ describe("the built package", () => {
 
   it("has an executable vpx script behind every bin", () => {
     for (const [name, target] of Object.entries(manifest.bin)) {
+      expect(target, `${name}: npm 12 drops a bin that starts with ./`).toMatch(
+        /^dist\//u,
+      );
       const file = inOutput(target);
       expect(fs.existsSync(file), name).toBe(true);
       expect(fs.statSync(file).mode & 0o111, name).not.toBe(0);
