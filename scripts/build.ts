@@ -46,6 +46,7 @@ export const entriesOf = (source: unknown): readonly string[] => {
  * `dist/` and each bin to its code. `imports` serves the source tree alone, `private` keeps the
  * source from being published to a registry by accident, and `//` is a note for the source's
  * readers.
+ * A bin path has no leading `./`: npm 12 drops such a bin from the package it publishes.
  * A release stamps its `version`, which `pnpm list` reports as the locked version.
  */
 export const builtManifest = (
@@ -64,7 +65,10 @@ export const builtManifest = (
       ]),
     ),
     bin: Object.fromEntries(
-      Object.entries(bin).map(([key, target]) => [key, built(target, ".mjs")]),
+      Object.entries(bin).map(([key, target]) => [
+        key,
+        built(target, ".mjs").replace(/^\.\//u, ""),
+      ]),
     ),
   };
 };

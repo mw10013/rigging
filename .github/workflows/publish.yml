@@ -36,4 +36,10 @@ jobs:
       - run: vp test run
       - run: vp run build
       - run: npm install -g npm@latest
+      # npm "auto-corrects" a manifest it dislikes by dropping fields, such as a bin, and
+      # only warns. Fail instead.
+      - name: npm accepts the manifest unchanged
+        run: |
+          npm publish ./dist --dry-run 2>&1 | tee publish-dry-run.txt
+          ! grep -q "auto-corrected" publish-dry-run.txt
       - run: npm publish ./dist --provenance
