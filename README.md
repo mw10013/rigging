@@ -3,7 +3,7 @@
 `@mw10013/rigging` is the house toolkit for Effect, TypeScript and Vite+ projects. `core` serves
 any project; `cloudflare` is an optional layer that loads only where an app uses it. Shopify dev
 tooling (berth leases, the app's dev and e2e servers, Agent Chrome) lives in
-`@mw10013/shopify-app-workers`, which builds on rigging.
+`@mw10013/shopify-app-cloudflare`, which builds on rigging.
 
 Published on npm: https://www.npmjs.com/package/@mw10013/rigging
 
@@ -91,7 +91,7 @@ projects: [
 ```
 
 A Shopify app builds on the Cloudflare config. Its e2e preset, with store leases and the embedded
-admin, is `@mw10013/shopify-app-workers`, which starts from `e2eConfig` and reads the server's
+admin, is `@mw10013/shopify-app-cloudflare`, which starts from `e2eConfig` and reads the server's
 tunnel with `runningServer("e2e")`:
 
 ```ts
