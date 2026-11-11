@@ -1,8 +1,9 @@
 /**
  * A Playwright reporter that rewrites the `json` reporter's `outputFile` without ANSI escapes,
  * after every reporter has finished. Playwright runs its workers with `FORCE_COLOR=1`, so error
- * messages, stacks and captured output reach the `json` reporter coloured. Like the `json`
- * reporter, it takes `PLAYWRIGHT_JSON_OUTPUT_FILE` over `outputFile`.
+ * messages, stacks and captured output reach the `json` reporter coloured. It finds the file as the
+ * `json` reporter does: `PLAYWRIGHT_JSON_OUTPUT_FILE` against the working directory, else
+ * `outputFile` against the config's directory.
  *
  * @module
  */
@@ -14,11 +15,18 @@ import { stripVTControlCharacters } from "node:util";
 export default class PlainJsonReporter {
   readonly #outputFile: string;
 
-  constructor({ outputFile }: { readonly outputFile: string }) {
+  constructor({
+    outputFile,
+    configDir,
+  }: {
+    readonly outputFile: string;
+    readonly configDir: string;
+  }) {
     const override = process.env.PLAYWRIGHT_JSON_OUTPUT_FILE;
-    this.#outputFile = path.resolve(
-      override === undefined || override === "" ? outputFile : override,
-    );
+    this.#outputFile =
+      override === undefined || override === ""
+        ? path.resolve(configDir, outputFile)
+        : path.resolve(override);
   }
 
   printsToStdio() {
