@@ -2,9 +2,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { beforeAll, describe, expect, it } from "@effect/vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "@effect/vitest";
 
-import { runningServer } from "#rigging/core/test.ts";
+import { e2eConfig, runningServer } from "#rigging/core/test.ts";
 
 const stoppedApp = () => {
   const root = mkdtempSync(path.join(tmpdir(), "rigging-test-"));
@@ -29,5 +29,20 @@ describe("runningServer", () => {
     expect(() => runningServer("e2e", root, "vp run serve")).toThrow(
       "start it with vp run serve",
     );
+  });
+});
+
+describe("e2eConfig", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("unsets NO_COLOR, which Playwright's workers get beside FORCE_COLOR=1", () => {
+    vi.stubEnv("NO_COLOR", "1");
+    vi.stubEnv("E2E_RUN_DIR", mkdtempSync(path.join(tmpdir(), "rigging-e2e-")));
+    expect(() => e2eConfig({ root: stoppedApp() })).toThrow(
+      "the e2e server is stopped",
+    );
+    expect(process.env.NO_COLOR).toBeUndefined();
   });
 });
