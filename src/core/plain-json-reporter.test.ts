@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import process from "node:process";
 
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 
@@ -52,18 +53,42 @@ describe("PlainJsonReporter", () => {
     vi.unstubAllEnvs();
   });
 
-  it("rewrites the json report without ANSI escapes", () => {
-    const outputFile = colouredReport();
-    new PlainJsonReporter({ outputFile }).onExit();
-    expectPlain(outputFile);
-  });
-
-  it("rewrites the file PLAYWRIGHT_JSON_OUTPUT_FILE names, as the json reporter does", () => {
-    const outputFile = colouredReport();
-    vi.stubEnv("PLAYWRIGHT_JSON_OUTPUT_FILE", outputFile);
-    new PlainJsonReporter({
-      outputFile: path.join(path.dirname(outputFile), "configured.json"),
-    }).onExit();
-    expectPlain(outputFile);
-  });
+  it.each([
+    {
+      name: "an absolute outputFile",
+      options: (file: string) => ({ outputFile: file, configDir: tmpdir() }),
+    },
+    {
+      name: "an outputFile relative to configDir",
+      options: (file: string) => ({
+        outputFile: path.basename(file),
+        configDir: path.dirname(file),
+      }),
+    },
+    {
+      name: "PLAYWRIGHT_JSON_OUTPUT_FILE, relative to the working directory",
+      override: (file: string) => path.relative(process.cwd(), file),
+      options: (file: string) => ({
+        outputFile: "configured.json",
+        configDir: path.dirname(file),
+      }),
+    },
+    {
+      name: "outputFile when PLAYWRIGHT_JSON_OUTPUT_FILE is empty",
+      override: () => "",
+      options: (file: string) => ({
+        outputFile: path.basename(file),
+        configDir: path.dirname(file),
+      }),
+    },
+  ])(
+    "rewrites the file the json reporter wrote: $name",
+    ({ options, override }) => {
+      const file = colouredReport();
+      if (override !== undefined)
+        vi.stubEnv("PLAYWRIGHT_JSON_OUTPUT_FILE", override(file));
+      new PlainJsonReporter(options(file)).onExit();
+      expectPlain(file);
+    },
+  );
 });
