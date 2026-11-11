@@ -85,8 +85,7 @@ describe("PlainJsonReporter", () => {
     "rewrites the file the json reporter wrote: $name",
     ({ options, override }) => {
       const file = colouredReport();
-      if (override !== undefined)
-        vi.stubEnv("PLAYWRIGHT_JSON_OUTPUT_FILE", override(file));
+      vi.stubEnv("PLAYWRIGHT_JSON_OUTPUT_FILE", override?.(file));
       new PlainJsonReporter(options(file)).onExit();
       expectPlain(file);
     },
