@@ -90,7 +90,9 @@ export const runningServer = (
  * `e2e`), each run's results kept in `.test-results/e2e/<start time>/`. That directory holds
  * `results.json`, `report/` (`playwright show-report <dir>/report`) and `results/`, each failed
  * test's trace and error context. `results/.last-run.json` carries over, so `--last-failed` works.
- * On CI it forbids `.only`, retries twice and runs one worker.
+ * `results.json` is plain text, and the config unsets `NO_COLOR`, which Node warns about beside the
+ * `FORCE_COLOR=1` Playwright gives its workers. On CI it forbids `.only`, retries twice and runs
+ * one worker.
  */
 export const e2eConfig = ({
   root = process.cwd(),
@@ -101,13 +103,16 @@ export const e2eConfig = ({
   readonly server?: string;
   readonly start?: string;
 } = {}) => {
+  delete process.env.NO_COLOR;
   const run = testRunDirectory("e2e", ["results/.last-run.json"], root);
   if (process.env.TEST_WORKER_INDEX === undefined)
     console.log(`e2e results: ${run}`);
   const ci = Boolean(process.env.CI);
+  const results = `${run}/results.json`;
   const reporter: ([string] | [string, Record<string, unknown>])[] = [
     ["list"],
-    ["json", { outputFile: `${run}/results.json` }],
+    ["json", { outputFile: results }],
+    ["@mw10013/rigging/core/plain-json-reporter", { outputFile: results }],
     ["html", { outputFolder: `${run}/report`, open: "never" }],
   ];
   return {

@@ -14,7 +14,8 @@ pnpm add -D @mw10013/rigging
 ## Layers
 
 - `core`: the app root (`core/app`), the house lint rules (`core/lint/rules`), the test presets
-  (`core/test`, `core/browser-test`), per-run test result directories (`core/test-runs`), a
+  (`core/test`, `core/browser-test`), per-run test result directories (`core/test-runs`), the
+  Playwright reporter that keeps `results.json` plain (`core/plain-json-reporter`), a
   child-process runner (`core/command`) and the Vite plugin that publishes a dev server's port
   (`core/server-endpoint`).
 - `cloudflare`: stages and environments (`cloudflare/stage`), Alchemy stack helpers

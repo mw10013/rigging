@@ -21,6 +21,7 @@
     "./core/test": "./core/test.ts",
     "./core/browser-test": "./core/browser-test.ts",
     "./core/test-runs": "./core/test-runs.ts",
+    "./core/plain-json-reporter": "./core/plain-json-reporter.ts",
     "./core/server-endpoint": "./core/server-endpoint.ts",
     "./core/lint/rules": "./core/lint/rules.ts",
     "./core/lint/conventions": "./core/lint/conventions.ts",
