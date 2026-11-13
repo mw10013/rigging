@@ -13,28 +13,18 @@
 
 import type { OxlintConfig } from "vite-plus/lint";
 
-/**
- * Effect is consumed one module at a time: `import * as Effect from "effect/Effect"`. The root
- * barrel drags all 160 modules through Vite dev and the Worker bundle.
- */
 const effectBarrel = {
   name: "effect",
   message:
     'Import Effect modules by path: import * as Effect from "effect/Effect".',
 };
 
-/** A subpackage's index (`effect/rpc`) is a barrel too; its modules have paths: `effect/rpc/RpcClient`. */
 const effectSubpackageBarrel = {
   regex: "^effect/[a-z]+$",
   message:
     'Import Effect subpackage modules by path: import * as RpcClient from "effect/rpc/RpcClient".',
 };
 
-/**
- * A path that climbs out of its folder names its target by the `package.json` `imports` entry
- * instead: `#area/file.ts`, not `../../area/file.ts`. The entry says which area the
- * import enters, and it stays valid when the importing file moves.
- */
 const parentPath = {
   regex: String.raw`(^|/)\.\.(/|$)`,
   message:
@@ -47,7 +37,6 @@ const aliasPath = {
     "Import across folders through a `#` subpath from `package.json` `imports`, not an `@/` alias.",
 };
 
-/** `#root/*` is for the files that must sit at the repository root; an area's file has its own entry. */
 const rootIntoArea = {
   regex: "^#root/(src|test|scripts)/",
   message:
@@ -75,7 +64,6 @@ export const lint = {
   },
   env: { builtin: true },
   rules: {
-    // Options on enabled rules, and opt-ins beyond the categories.
     // The formatter orders import statements; this orders the names inside one.
     "sort-imports": [
       "error",

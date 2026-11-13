@@ -53,11 +53,6 @@ const filesUnder = (directory: string): string[] =>
         : [path.join(directory, entry.name)],
     );
 
-/**
- * Every module specifier a built file names: `import … from "x"`, `export … from "x"`, `import "x"`
- * and `import("x")`, which in a `.d.mts` is a type. A line-anchored pattern keeps a specifier that
- * only appears inside a string or a comment, like a lint message's example, out of the result.
- */
 const specifiersOf = (file: string): string[] => {
   const text = fs.readFileSync(file, "utf8");
   const pattern =
@@ -74,7 +69,6 @@ const packageOf = (specifier: string) => {
   return specifier.startsWith("@") ? `${first}/${second}` : first;
 };
 
-/** Every bare specifier in the built graph an entry reaches, following relative imports. */
 const bareSpecifiersReachedFrom = (entry: string): Set<string> => {
   const bare = new Set<string>();
   const seen = new Set<string>();

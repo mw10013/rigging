@@ -1,8 +1,5 @@
 #!/usr/bin/env vpx
 /**
- * `rigging <server|stage|logs> ...`: an app's script is `"dev:stop": "rigging server stop dev"`.
- *
- * Each group loads only its own layer, so a project without Alchemy can run `rigging server`.
  * The shebang is `vpx`, not `node`: `stage` imports the app's `stacks/stage-env.ts`, whose
  * imports (`#backend/…`) can reach syntax Node's built-in type stripping refuses.
  *

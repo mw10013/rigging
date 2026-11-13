@@ -1,11 +1,3 @@
-/**
- * The runner (`rigging server run`) owns three processes, each in its own process
- * group: itself, the server's command, and the `s6-log` that writes its
- * output. A stop signals the command's group alone, so the runner and the
- * logger outlive it, drain its last lines and mark its exit.
- *
- * @module
- */
 import { randomBytes } from "node:crypto";
 import { constants } from "node:os";
 
@@ -43,7 +35,6 @@ export const START_TIMEOUT = Duration.minutes(3);
 const RECORD_TIMEOUT = Duration.seconds(30);
 const STOP_TIMEOUT = Duration.seconds(30);
 const POLL = Duration.millis(500);
-/** The first request after a start may wait on a compile. */
 const ANSWER_TIMEOUT = Duration.seconds(10);
 
 /** `s6-log`'s rotation: 20 files of 5 MiB, 100 MiB in all, a timestamp on each line. */
@@ -184,7 +175,6 @@ const portListener = Effect.fn("Server.portListener")(function* (
   return listenerOf(listening, yield* processTable, command);
 });
 
-/** `pid 61359 (workerd serve …) in /path/to/its/checkout`, for a failure's message. */
 const holderOf = Effect.fn("Server.holderOf")(function* (pid: number) {
   const cwd = (yield* output("lsof", [
     "-a",
@@ -433,11 +423,6 @@ export interface StatusJson {
   readonly log: string;
 }
 
-/**
- * The server's status, and who listens on its published port. The port counts as the server's
- * only when the command or one of its descendants listens there: anything answers HTTP on a port
- * another process holds.
- */
 const sight = Effect.fn("Server.sight")(function* (
   root: string,
   name: ServerName,

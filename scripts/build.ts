@@ -1,13 +1,3 @@
-/**
- * Builds `src` into the package `@mw10013/rigging`: `<out>/package.json` and `<out>/dist/`,
- * JavaScript and `.d.mts` files. `src/package.json` is the one list of the public surface.
- * The build's entries are its `exports` and `bin` targets, and the built manifest maps each of
- * them into `dist/`, so no second list exists to drift. A module no entry names still builds, as
- * a chunk the entries import, but has no `.d.mts` and no `exports` key, so an app cannot import
- * it.
- *
- * @module
- */
 import * as path from "node:path";
 
 import * as Effect from "effect/Effect";
@@ -32,23 +22,12 @@ const decodeJsonObject = Schema.decodeUnknownEffect(JsonObject);
 const built = (target: string, extension: ".d.mts" | ".mjs") =>
   `./dist/${target.replace(/^\.\//u, "").replace(/\.ts$/u, extension)}`;
 
-/**
- * The source manifest's source files, as {@link build} compiles them: every `exports` and `bin`
- * target, relative to `src`.
- */
 export const entriesOf = (source: unknown): readonly string[] => {
   const { exports, bin } = decodeSource(source);
   return [...Object.values(exports), ...Object.values(bin)];
 };
 
-/**
- * The published manifest: the source's, with each export mapped to its types and its code in
- * `dist/` and each bin to its code. `imports` serves the source tree alone, `private` keeps the
- * source from being published to a registry by accident, and `//` is a note for the source's
- * readers.
- * A bin path has no leading `./`: npm 12 drops such a bin from the package it publishes.
- * A release stamps its `version`, which `pnpm list` reports as the locked version.
- */
+/** A bin path has no leading `./`: npm 12 drops such a bin from the package it publishes. */
 export const builtManifest = (
   source: Record<string, unknown>,
   version?: string,
@@ -73,12 +52,7 @@ export const builtManifest = (
   };
 };
 
-/**
- * Builds the package into `outDirectory`, replacing what was there, and stamps `version` into its
- * manifest when given. `vp pack` runs in
- * `src`, so Rolldown reads `src/package.json`'s peer dependencies and leaves them
- * external, and `tsconfig.build.json` limits type-checking to the package instead of the scripts.
- */
+/** `vp pack` runs in `src`, so Rolldown reads `src/package.json`'s peer dependencies and leaves them external. */
 export const build = Effect.fn("Build.build")(function* (
   outDirectory: string = OUTPUT,
   version?: string,

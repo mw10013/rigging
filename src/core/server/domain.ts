@@ -1,14 +1,3 @@
-/**
- * A server is one long-lived command per checkout and name, run in the
- * foreground by `rigging server run`, its runner. Each actor owns its own file under
- * `.rigging/servers/<name>/`, so no two write the same one:
- *
- * - `record.json`: the runner's {@link ServerRecord}, from launch to exit.
- * - `endpoint.json`: the server's {@link Endpoint}, written by the
- *   command itself once it knows its port, through `RIGGING_ENDPOINT`.
- *
- * @module
- */
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -28,9 +17,7 @@ export const ServerRecord = Schema.Struct({
   rigging: Schema.Literal(1),
   name: ServerName,
   run: RunId,
-  /** The runner, `rigging server run`. */
   pid: Pid,
-  /** The command's process group; the command leads it. */
   group: Pid,
   startedAt: Schema.String,
   command: Schema.Array(Schema.String),
@@ -46,7 +33,6 @@ export type Endpoint = typeof Endpoint.Type;
 export const ServerRecordJson = Schema.fromJsonString(ServerRecord);
 export const EndpointJson = Schema.fromJsonString(Endpoint);
 
-/** rigging server owns `.rigging/servers/` in each checkout; its `.gitignore` keeps the folder out of git. */
 export const SERVERS_DIRECTORY = ".rigging/servers";
 
 export const files = (name: ServerName) => ({
@@ -121,7 +107,6 @@ export type PortListener =
   | { readonly _tag: "Server" }
   | { readonly _tag: "Taken"; readonly pids: readonly number[] };
 
-/** Deeper than any real process tree; it ends the walk should `parents` hold a cycle. */
 const MAX_ANCESTRY = 256;
 
 const descends = (
@@ -166,7 +151,6 @@ export type ServerState = typeof ServerState.Type;
 export interface Sighting {
   readonly runner: boolean;
   readonly group: boolean;
-  /** The server itself listens on its published port and answers HTTP there. */
   readonly answering: boolean;
 }
 

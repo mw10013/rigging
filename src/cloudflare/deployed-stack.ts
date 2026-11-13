@@ -136,14 +136,8 @@ export const alchemyCommandOf = (
   argv: readonly string[],
 ): AlchemyCommand | undefined => argv.slice(2).find(Schema.is(AlchemyCommand));
 
-/** Who runs Alchemy on a deployed stage: Workers Builds, or the `stage` CLI for one of its reasons. */
 type DeployedRun = "builds" | StageRun;
 
-/**
- * What each run may do. Builds only deploys; each `stage` subcommand runs the one command it is
- * for, `up` the stage's first deploy from a checkout at the stage's branch. Only `reset` destroys,
- * and only a {@link ResettableDeployed} stage, so nothing destroys production.
- */
 const permits: Record<
   DeployedRun,
   {

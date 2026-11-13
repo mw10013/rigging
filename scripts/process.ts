@@ -22,7 +22,6 @@ export interface Output {
 const lastLine = (text: string) =>
   text.trim().split("\n").at(-1) ?? "no output";
 
-/** `env` is added to the inherited environment. */
 export const capture = Effect.fn("Process.capture")(function* (
   directory: string,
   program: string,
@@ -75,7 +74,6 @@ export const run = Effect.fn("Process.run")(function* (
   return output.stdout;
 });
 
-/** Streams the program's output to stderr, keeping stdout for JSON. `env` is added to the inherited environment. */
 export const stream = Effect.fn("Process.stream")(function* (
   directory: string,
   program: string,

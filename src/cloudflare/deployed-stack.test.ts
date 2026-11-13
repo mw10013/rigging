@@ -226,7 +226,6 @@ describe("deployedRunRefusal", () => {
   });
 });
 
-/** Runs `effect` with only `env` of the run variables set, and `argv` as the process's. */
 const withRun = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   env: Record<string, string>,

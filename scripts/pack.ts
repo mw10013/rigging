@@ -1,9 +1,3 @@
-/**
- * `vp run build`: builds the package into `dist/` with `LICENSE` and `README.md`, ready for
- * `npm publish ./dist`. The version comes from the root `package.json`.
- *
- * @module
- */
 import { copyFileSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 

@@ -1,7 +1,6 @@
 /**
  * An environment is a role (`dev`, `test`, `e2e`, `staging`, `production`); a stage is one copy of the stack in
- * an environment. Never shortened to `env`, which already means `.env`, `process.env` and a
- * Worker's bindings.
+ * an environment.
  *
  * Imports only `effect`, so any bundle may carry it.
  *
@@ -25,7 +24,7 @@ export type PerDeveloper = typeof PerDeveloper.Type;
 export const Deployed = Schema.Literals(["staging", "production"]);
 export type Deployed = typeof Deployed.Type;
 
-/** The branch whose pushes deploy the stage. Production moves only by fast-forward from `main`. */
+/** The branch whose pushes deploy the stage. */
 export const branchOf = (stage: Deployed): "main" | "production" =>
   stage === "staging" ? "main" : "production";
 
@@ -48,7 +47,6 @@ export const Environment = Schema.Literals([
 ]);
 export type Environment = typeof Environment.Type;
 
-/** Lowercase letters and digits, so a user never contains the `-` between a stage's parts. */
 const User = Schema.String.check(Schema.isPattern(/^[a-z0-9]+$/u));
 
 /**

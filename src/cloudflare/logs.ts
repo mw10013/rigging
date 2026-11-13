@@ -1,11 +1,3 @@
-/**
- * `vp run logs`: a {@link Deployed} stage's Worker logs from Workers
- * Observability, one line per event, for both of the app's Workers
- * ({@link workerNameOf}). An app runs it as the
- * `rigging logs` command: `"logs": "rigging logs"`.
- *
- * @module
- */
 import * as Argument from "effect/cli/Argument";
 import * as CliError from "effect/cli/CliError";
 import * as Command from "effect/cli/Command";
@@ -97,13 +89,8 @@ const textOf = ({ message, cause, annotations = {} }: typeof Message.Type) => {
   ].join(" ");
 };
 
-/**
- * Query parameters whose values never print: Shopify's `id_token`, `hmac` and
- * `session`, a magic link's `token`, OAuth's `code`, a signed URL's `signature`.
- */
 const SECRET_PARAM = /token|hmac|session|signature|code/iu;
 
-/** A request URL as its path and query, with secret parameters' values redacted. */
 export const redactUrl = (raw: string) => {
   const url = URL.parse(raw);
   if (url === null) return raw;
@@ -114,7 +101,6 @@ export const redactUrl = (raw: string) => {
   return `${url.pathname}${url.search}`;
 };
 
-/** One event as a `|`-separated line: time, Worker, level, outcome, status, request, request id, message. */
 export const lineOf = (stage: Deployed, event: Event) => {
   const workers = event.$workers;
   const request = workers?.event?.request;
@@ -355,7 +341,6 @@ const wait = Command.make(
   ),
 );
 
-/** `rigging logs`: the command `bin/rigging.ts` runs through {@link runCli}. */
 export const command = Command.make("logs").pipe(
   Command.withDescription(
     "Read staging's or production's Worker logs (website and backend).",
