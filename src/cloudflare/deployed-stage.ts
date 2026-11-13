@@ -197,6 +197,7 @@ export const staleVariables = (
     (name) => !variables.some((variable) => variable.name === name),
   );
 
+/** Compares by name and secrecy only: Cloudflare never returns a trigger variable's value. */
 export const variableProblems = (
   variables: readonly StageVariable[],
   existing: TriggerVariables,
@@ -678,6 +679,7 @@ const build = Effect.fn("DeployedStage.build")(function* (
   yield* Console.log(`${stage}: build ${done.build_uuid} succeeded`);
 });
 
+// Runs from a laptop: the Builds API takes only a user API token.
 export const up = Effect.fn("DeployedStage.up")(function* (
   stage: Deployed,
   options: { readonly dryRun: boolean; readonly confirmed: boolean },
