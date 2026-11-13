@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { NodeServices } from "@effect/platform-node";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
@@ -265,7 +265,7 @@ console.log(typeof (await import(setup)).default);`;
     for (const internal of [
       "core/orphans",
       "core/cli",
-      "core/bosun-port",
+      "core/server/port",
       "cloudflare/deployed-stage",
       "cloudflare/logs",
       "core/app.mjs",

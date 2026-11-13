@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { NodeServices } from "@effect/platform-node";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";

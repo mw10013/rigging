@@ -31,8 +31,6 @@ export const capture = Effect.fn("Process.capture")(function* (
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const command = [program, ...args].join(" ");
-  const fail = (detail: string) =>
-    new CommandFailedError({ command, directory, detail });
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const child = yield* spawner.spawn(
@@ -53,7 +51,12 @@ export const capture = Effect.fn("Process.capture")(function* (
       );
       return { exitCode: Number(exitCode), stdout, stderr } satisfies Output;
     }),
-  ).pipe(Effect.mapError((error) => fail(error.message)));
+  ).pipe(
+    Effect.mapError(
+      (error) =>
+        new CommandFailedError({ command, directory, detail: error.message }),
+    ),
+  );
 });
 
 export const run = Effect.fn("Process.run")(function* (
