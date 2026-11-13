@@ -174,20 +174,30 @@ describe("the built package", () => {
     ).toEqual([]);
   });
 
+  const alchemyOrPlaywright = (specifiers: Iterable<string>) =>
+    [...specifiers].filter((specifier) =>
+      /^(?:alchemy(?:\/|$)|@alchemy\.run\/|playwright(?:\/|$))/u.test(
+        specifier,
+      ),
+    );
+
   it("keeps every core export clear of Alchemy and Playwright", () => {
     const core = Object.keys(manifest.exports).filter((key) =>
       key.startsWith("./core/"),
     );
     expect(core.length).toBeGreaterThan(0);
     for (const key of core)
-      expect(
-        [...reachedFrom(key)].filter((specifier) =>
-          /^(?:alchemy(?:\/|$)|@alchemy\.run\/|playwright(?:\/|$))/u.test(
-            specifier,
-          ),
-        ),
-        key,
-      ).toEqual([]);
+      expect(alchemyOrPlaywright(reachedFrom(key)), key).toEqual([]);
+  });
+
+  it("keeps rigging server clear of Alchemy and Playwright, as an app may install neither", () => {
+    const server = path.join(
+      path.dirname(manifest.bin.rigging ?? ""),
+      "../core/server/command.mjs",
+    );
+    const reached = bareSpecifiersReachedFrom(server);
+    expect(reached.size).toBeGreaterThan(0);
+    expect(alchemyOrPlaywright(reached)).toEqual([]);
   });
 });
 
