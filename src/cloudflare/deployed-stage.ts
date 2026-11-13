@@ -197,7 +197,7 @@ export const staleVariables = (
     (name) => !variables.some((variable) => variable.name === name),
   );
 
-/** Compares by name and secrecy only: Cloudflare never returns a trigger variable's value. */
+/** Compares by name and secrecy only: a secret's value cannot be read back. */
 export const variableProblems = (
   variables: readonly StageVariable[],
   existing: TriggerVariables,
