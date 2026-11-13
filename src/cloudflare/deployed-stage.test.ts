@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
@@ -13,81 +14,147 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { app } from "#rigging/core/app.ts";
 
 import {
-  canonicalTrigger,
+  type BuildConfig,
+  buildDrift,
+  buildPlan,
+  canonicalBuild,
   ensureWebsite,
+  readBuildConfig,
   replacesWebsite,
   stageVariables,
   staleVariables,
-  type Trigger,
-  triggerDrift,
-  triggerPlan,
   variableProblems,
 } from "./deployed-stage.ts";
 
 const TOKEN = "9faa0f15-edb6-4265-aa27-2f944dd4c14e";
 
-const listed = (overrides: Partial<Trigger> = {}): Trigger => ({
-  trigger_uuid: "2aad0c41-2dfb-4356-8af6-3d8a705c92fd",
-  trigger_name: "c028ea6f87854c129e76a0f7a2e3251b",
-  build_token_uuid: TOKEN,
-  build_command: "",
-  deploy_command: "pnpm exec vp exec alchemy deploy --stage production --yes",
-  root_directory: "/",
-  branch_includes: ["production"],
-  branch_excludes: [],
-  path_includes: ["*"],
-  path_excludes: [],
-  build_caching_enabled: false,
-  repo_connection: {
-    repo_connection_uuid: "b4e1753e-dde3-4964-a5b1-8ff71afa0f1f",
-    repo_name: "baton",
+const configFor = (
+  canonical: ReturnType<typeof canonicalBuild>,
+  overrides: {
+    readonly repo_name?: string;
+    readonly branch?: string;
+    readonly previews_enabled?: boolean;
+    readonly production_settings?: Partial<BuildConfig["production_settings"]>;
+  } = {},
+): BuildConfig => ({
+  git_repository: {
+    repo_name: overrides.repo_name ?? "baton",
+    branch: overrides.branch ?? canonical.branch,
   },
-  ...overrides,
+  production_settings: {
+    ...canonical.production_settings,
+    environment_variables: {},
+    ...overrides.production_settings,
+  },
+  previews_enabled: overrides.previews_enabled ?? canonical.previews_enabled,
 });
 
-describe("canonicalTrigger", () => {
-  it("names the trigger after the Website and deploys through the stage's script", () => {
-    expect(canonicalTrigger("staging", TOKEN)).toStrictEqual({
-      trigger_name: `${app().name}-website-staging`,
-      build_token_uuid: TOKEN,
-      build_command: "",
-      deploy_command: "pnpm exec vp run deploy:staging",
-      root_directory: "/",
-      branch_includes: ["main"],
-      branch_excludes: [],
-      path_includes: ["*"],
-      path_excludes: [],
-      build_caching_enabled: false,
+describe("canonicalBuild", () => {
+  it("builds the stage's branch with previews off and deploys through the stage's script", () => {
+    expect(canonicalBuild("staging", TOKEN)).toStrictEqual({
+      branch: "main",
+      previews_enabled: false,
+      production_settings: {
+        build_token_uuid: TOKEN,
+        build_command: "",
+        deploy_command: "pnpm exec vp run deploy:staging",
+        root_directory: "/",
+        path_includes: ["*"],
+        path_excludes: [],
+        build_caching_enabled: false,
+      },
     });
-    expect(canonicalTrigger("production", TOKEN).branch_includes).toStrictEqual(
-      ["production"],
-    );
+    expect(canonicalBuild("production", TOKEN).branch).toBe("production");
   });
 });
 
-describe("triggerDrift", () => {
-  it("names each setting that differs from the canonical trigger", () => {
-    expect(
-      triggerDrift(listed(), canonicalTrigger("production", TOKEN)),
-    ).toStrictEqual(["trigger_name", "deploy_command"]);
-  });
+describe("buildDrift", () => {
+  const canonical = canonicalBuild("production", TOKEN);
 
-  it("is empty for a canonical trigger", () => {
-    const canonical = canonicalTrigger("production", TOKEN);
-    expect(triggerDrift(listed(canonical), canonical)).toStrictEqual([]);
-  });
-
-  it("catches a preview trigger's branches and another token", () => {
+  it("is empty for a canonical configuration, whatever its variables", () => {
     expect(
-      triggerDrift(
-        listed({
-          ...canonicalTrigger("staging", "other-token"),
-          branch_includes: ["*"],
-          branch_excludes: ["main"],
+      buildDrift(
+        configFor(canonical, {
+          production_settings: {
+            environment_variables: { API_KEY: { is_secret: false } },
+          },
         }),
-        canonicalTrigger("staging", TOKEN),
+        canonical,
       ),
-    ).toStrictEqual(["build_token_uuid", "branch_includes", "branch_excludes"]);
+    ).toStrictEqual([]);
+  });
+
+  it("names each differing setting, the branch and previews", () => {
+    expect(
+      buildDrift(
+        configFor(canonical, {
+          branch: "main",
+          previews_enabled: true,
+          production_settings: {
+            build_token_uuid: "other-token",
+            deploy_command:
+              "pnpm exec vp exec alchemy deploy --stage production --yes",
+            path_includes: ["src/*"],
+          },
+        }),
+        canonical,
+      ),
+    ).toStrictEqual([
+      "build_token_uuid",
+      "deploy_command",
+      "path_includes",
+      "branch",
+      "previews_enabled",
+    ]);
+  });
+});
+
+describe("buildPlan", () => {
+  const canonical = canonicalBuild("production", TOKEN);
+
+  it("creates the configuration when the Website has none", () => {
+    expect(buildPlan(canonical, "baton", Option.none())).toStrictEqual([
+      { _tag: "Create" },
+    ]);
+  });
+
+  it("replaces a configuration on another repository", () => {
+    expect(
+      buildPlan(
+        canonical,
+        "baton",
+        Option.some(configFor(canonical, { repo_name: "other" })),
+      ),
+    ).toStrictEqual([
+      { _tag: "Delete", repoName: "other" },
+      { _tag: "Create" },
+    ]);
+  });
+
+  it("updates a drifted configuration in place, previews included", () => {
+    expect(
+      buildPlan(
+        canonical,
+        "baton",
+        Option.some(
+          configFor(canonical, {
+            previews_enabled: true,
+            production_settings: { build_caching_enabled: true },
+          }),
+        ),
+      ),
+    ).toStrictEqual([
+      {
+        _tag: "Update",
+        settings: ["build_caching_enabled", "previews_enabled"],
+      },
+    ]);
+  });
+
+  it("is empty for a canonical configuration", () => {
+    expect(
+      buildPlan(canonical, "baton", Option.some(configFor(canonical))),
+    ).toStrictEqual([]);
   });
 });
 
@@ -122,58 +189,6 @@ describe("replacesWebsite", () => {
         )}[20:38:14.753] INFO: [WebsiteAssets] replace\n`,
       ),
     ).toBe(false);
-  });
-});
-
-describe("triggerPlan", () => {
-  const canonical = canonicalTrigger("production", TOKEN);
-
-  it("is empty for one canonical trigger with previews off", () => {
-    const trigger = listed(canonical);
-    expect(triggerPlan(canonical, "baton", [trigger], false)).toStrictEqual({
-      kept: trigger,
-      steps: [],
-    });
-  });
-
-  it("creates the trigger when the Website has none on the repository", () => {
-    expect(
-      triggerPlan(canonical, "baton", [], false).steps.map(({ _tag }) => _tag),
-    ).toStrictEqual(["Create"]);
-    const elsewhere = listed({
-      repo_connection: { repo_connection_uuid: "x", repo_name: "other" },
-    });
-    expect(
-      triggerPlan(canonical, "baton", [elsewhere], false).steps.map(
-        ({ _tag }) => _tag,
-      ),
-    ).toStrictEqual(["Create", "Delete"]);
-  });
-
-  it("updates the stage branch's trigger in place, then deletes the rest and turns previews off", () => {
-    const preview = listed({
-      ...canonical,
-      trigger_uuid: "preview",
-      branch_includes: ["*"],
-      branch_excludes: ["production"],
-    });
-    const own = listed();
-    const { kept, steps } = triggerPlan(
-      canonical,
-      "baton",
-      [preview, own],
-      true,
-    );
-    expect(kept).toBe(own);
-    expect(steps).toStrictEqual([
-      {
-        _tag: "Update",
-        trigger: own,
-        settings: ["trigger_name", "deploy_command"],
-      },
-      { _tag: "Delete", trigger: preview },
-      { _tag: "DisablePreviews" },
-    ]);
   });
 });
 
@@ -268,14 +283,14 @@ describe("stageVariables", () => {
   });
 });
 
-describe("trigger variables", () => {
+describe("build configuration variables", () => {
   const variablesFor = (file: Record<string, string>) => {
     const exit = variablesOf(file);
     return Exit.isSuccess(exit) ? exit.value : [];
   };
   const variables = variablesFor({ API_KEY: "key", API_SECRET: SECRET });
 
-  it("finds the trigger's variables the file does not set", () => {
+  it("finds the configuration's variables the file does not set", () => {
     expect(
       staleVariables(variables, {
         API_KEY: { is_secret: false },
@@ -291,9 +306,9 @@ describe("trigger variables", () => {
         OLD: { is_secret: false },
       }),
     ).toStrictEqual([
-      "the trigger holds API_KEY as a secret",
-      "the trigger lacks API_SECRET",
-      "the trigger holds OLD, which the file does not set",
+      "the build configuration holds API_KEY as a secret",
+      "the build configuration lacks API_SECRET",
+      "the build configuration holds OLD, which the file does not set",
     ]);
     expect(
       variableProblems(variables, {
@@ -303,8 +318,8 @@ describe("trigger variables", () => {
     ).toStrictEqual([]);
   });
 
-  it("deletes an optional field the file leaves out from the trigger, and sets it where the file holds it", () => {
-    const trigger = {
+  it("deletes an optional field the file leaves out from the configuration, and sets it where the file holds it", () => {
+    const existing = {
       API_KEY: { is_secret: false },
       API_SECRET: { is_secret: true },
       CONTROL_TOKEN: { is_secret: true },
@@ -313,17 +328,19 @@ describe("trigger variables", () => {
       "API_KEY",
       "API_SECRET",
     ]);
-    expect(staleVariables(variables, trigger)).toStrictEqual(["CONTROL_TOKEN"]);
-    expect(variableProblems(variables, trigger)).toStrictEqual([
-      "the trigger holds CONTROL_TOKEN, which the file does not set",
+    expect(staleVariables(variables, existing)).toStrictEqual([
+      "CONTROL_TOKEN",
+    ]);
+    expect(variableProblems(variables, existing)).toStrictEqual([
+      "the build configuration holds CONTROL_TOKEN, which the file does not set",
     ]);
     const staging = variablesFor({
       API_KEY: "key",
       API_SECRET: SECRET,
       CONTROL_TOKEN,
     });
-    expect(staleVariables(staging, trigger)).toStrictEqual([]);
-    expect(variableProblems(staging, trigger)).toStrictEqual([]);
+    expect(staleVariables(staging, existing)).toStrictEqual([]);
+    expect(variableProblems(staging, existing)).toStrictEqual([]);
   });
 });
 
@@ -331,6 +348,9 @@ const FAKES = {
   cf: `#!/bin/sh
 case "$*" in
   "workers scripts search --name "*) cat "$DEVKIT_FAKES/scripts.json" ;;
+  "builds workers get "*)
+    if [ -f "$DEVKIT_FAKES/config.json" ]; then cat "$DEVKIT_FAKES/config.json"
+    else cat "$DEVKIT_FAKES/config.err" >&2; exit 1; fi ;;
   *) echo "unexpected cf $*" >&2; exit 1 ;;
 esac
 `,
@@ -352,29 +372,10 @@ cp "$DEVKIT_FAKES/deployed.json" "$DEVKIT_FAKES/scripts.json"
 `,
 };
 
-describe("ensureWebsite", () => {
+const useFakes = () => {
   const saved = { path: process.env.PATH, fakes: process.env.DEVKIT_FAKES };
   let fakes = "";
   const fake = (file: string) => path.join(fakes, file);
-  const read = (file: string) =>
-    fs.existsSync(fake(file)) ? fs.readFileSync(fake(file), "utf8") : "";
-  const website = (stage: "staging" | "production", id: string) =>
-    JSON.stringify([{ id, script_name: `${app().name}-website-${stage}` }]);
-  const checkout = (state: {
-    status?: string;
-    head?: string;
-    origin?: string;
-  }) => {
-    fs.writeFileSync(fake("status"), state.status ?? "");
-    fs.writeFileSync(fake("head"), state.head ?? "abc123\n");
-    fs.writeFileSync(fake("origin"), state.origin ?? "abc123\n");
-  };
-  const exit = variablesOf({ API_KEY: "key", API_SECRET: SECRET });
-  const variables = Exit.isSuccess(exit) ? exit.value : [];
-  const run = (stage: "staging" | "production") =>
-    Effect.runPromiseExit(
-      ensureWebsite(stage, variables).pipe(Effect.provide(NodeServices.layer)),
-    );
 
   beforeEach(() => {
     fakes = fs.mkdtempSync(path.join(os.tmpdir(), "rigging-stage-"));
@@ -392,12 +393,80 @@ describe("ensureWebsite", () => {
     fs.rmSync(fakes, { recursive: true, force: true });
   });
 
+  return {
+    dir: () => fakes,
+    fake,
+    read: (file: string) =>
+      fs.existsSync(fake(file)) ? fs.readFileSync(fake(file), "utf8") : "",
+  };
+};
+
+const website = (stage: "staging" | "production", id: string) =>
+  JSON.stringify([{ id, script_name: `${app().name}-website-${stage}` }]);
+
+describe("readBuildConfig", () => {
+  const { fake } = useFakes();
+  const run = () =>
+    Effect.runPromiseExit(
+      readBuildConfig("tag-old").pipe(Effect.provide(NodeServices.layer)),
+    );
+  const canonical = canonicalBuild("staging", TOKEN);
+
+  it("reads the Worker's configuration", async () => {
+    const config = configFor(canonical, {
+      production_settings: {
+        environment_variables: { API_KEY: { is_secret: false } },
+      },
+    });
+    fs.writeFileSync(fake("config.json"), JSON.stringify(config));
+    const result = await run();
+    expect(Exit.isSuccess(result) && result.value).toStrictEqual(
+      Option.some(config),
+    );
+  });
+
+  it("reads none when Builds has no configuration for the Worker, so the plan creates one", async () => {
+    fs.writeFileSync(
+      fake("config.err"),
+      "[12040] No build configuration associated with that script tag was found\n404 Not Found\n",
+    );
+    const result = await run();
+    expect(Exit.isSuccess(result) && result.value).toStrictEqual(Option.none());
+    expect(
+      Exit.isSuccess(result) && buildPlan(canonical, "baton", result.value),
+    ).toStrictEqual([{ _tag: "Create" }]);
+  });
+
+  it("fails on any other cf failure", async () => {
+    fs.writeFileSync(fake("config.err"), "[10000] Authentication error\n");
+    expect(failureOf(await run())).toContain("Authentication error");
+  });
+});
+
+describe("ensureWebsite", () => {
+  const { dir, fake, read } = useFakes();
+  const checkout = (state: {
+    status?: string;
+    head?: string;
+    origin?: string;
+  }) => {
+    fs.writeFileSync(fake("status"), state.status ?? "");
+    fs.writeFileSync(fake("head"), state.head ?? "abc123\n");
+    fs.writeFileSync(fake("origin"), state.origin ?? "abc123\n");
+  };
+  const exit = variablesOf({ API_KEY: "key", API_SECRET: SECRET });
+  const variables = Exit.isSuccess(exit) ? exit.value : [];
+  const run = (stage: "staging" | "production") =>
+    Effect.runPromiseExit(
+      ensureWebsite(stage, variables).pipe(Effect.provide(NodeServices.layer)),
+    );
+
   it("reaches only the fake alchemy", () => {
     expect(
       (process.env.PATH ?? "")
         .split(":")
         .filter((directory) => fs.existsSync(path.join(directory, "alchemy"))),
-    ).toStrictEqual([fakes]);
+    ).toStrictEqual([dir()]);
   });
 
   it("deploys a missing Website from a clean checkout at origin, values in the environment only", async () => {

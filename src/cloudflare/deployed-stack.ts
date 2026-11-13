@@ -3,8 +3,8 @@
  * the `secrets` policy, and the check that the stage's environment holds every field the app
  * declares ({@link requireStageEnv}).
  *
- * A deployed stage's values are its Workers Builds trigger's variables, which `vp run stage up`
- * syncs from `.env.<stage>` and Builds puts in the deploy's environment.
+ * A deployed stage's values are its Workers Builds configuration's variables, which
+ * `vp run stage up` syncs from `.env.<stage>` and Builds puts in the deploy's environment.
  *
  * {@link stageState} admits a run on a deployed stage only from Workers Builds on the stage's
  * branch or from the `stage` CLI, and only the Alchemy command that run is for
@@ -89,10 +89,10 @@ export const stageProviders: ReturnType<typeof Cloudflare.providers> =
 
 /**
  * The `secrets` option of every app stack. A per-developer stage reads `.env`, then the shell. A
- * {@link Deployed} stage reads no file: Workers Builds puts its trigger's variables in the shell. Its list
- * is empty rather than `ProcessEnv({ disabled: true })` because Alchemy appends the shell to any
- * list that does not name it, and the providers are built under the same configuration, so the
- * shell is where Workers Builds hands the deploy its Cloudflare credentials.
+ * {@link Deployed} stage reads no file: Workers Builds puts its configuration's variables in the
+ * shell. Its list is empty rather than `ProcessEnv({ disabled: true })` because Alchemy appends
+ * the shell to any list that does not name it, and the providers are built under the same
+ * configuration, so the shell is where Workers Builds hands the deploy its Cloudflare credentials.
  *
  * Declaring `secrets` also makes `--env-file` a hard error, so no flag can bring a file back.
  */
@@ -180,7 +180,7 @@ export const deployedRunRefusal = (
     env.WORKERS_CI_BRANCH !== branch
   )
     return Option.some(
-      `${stage} deploys from branch ${branch}, not ${env.WORKERS_CI_BRANCH ?? "(none)"}. Point the trigger at ${branch} with vp run stage up ${stage}`,
+      `${stage} deploys from branch ${branch}, not ${env.WORKERS_CI_BRANCH ?? "(none)"}. Point the build configuration at ${branch} with vp run stage up ${stage}`,
     );
   const run: DeployedRun | undefined =
     reason ?? (env.WORKERS_CI === "1" ? "builds" : undefined);
@@ -306,7 +306,7 @@ export class StageEnvMissingError extends Schema.TaggedError<StageEnvMissingErro
 /**
  * The app stack's first step. On a {@link Deployed} stage it dies unless the environment holds
  * every required one of `fields` and each optional one it holds is valid, so a Builds deploy
- * missing a trigger variable fails instead of binding nothing where a Worker reads `Config.option`.
+ * missing a configuration variable fails instead of binding nothing where a Worker reads `Config.option`.
  *
  * @example
  * export default Alchemy.Stack("app", { providers: stageProviders, state: stageState, secrets: deployedSecrets },
