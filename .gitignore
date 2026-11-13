@@ -5,3 +5,4 @@ coverage/
 .DS_Store
 .rigging/
 .test-results/
+/refs
