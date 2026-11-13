@@ -33,7 +33,6 @@ const directory = () => {
   return made;
 };
 
-/** Starts `sleep` from a shell that exits at once, so the sleep's parent becomes pid 1. */
 const orphan = (cwd: string) => {
   const pid = Number(
     execFileSync("sh", ["-c", "sleep 600 >/dev/null 2>&1 & echo $!"], {

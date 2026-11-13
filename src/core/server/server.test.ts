@@ -31,7 +31,6 @@ if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log(
 }
 `;
 
-/** What `rigging server` prints: a server's record, or the error a command failed with. */
 interface Printed {
   readonly state: string;
   readonly name: string;

@@ -1,11 +1,10 @@
 /**
- * Processes a checkout left running with no owner: their parent is pid 1, and they work inside
- * the checkout. An integration run's workerd becomes one when the test process dies mid-run:
- * Alchemy's sidecar, workerd's parent, exits without stopping it, and it holds its ports until
- * someone kills it.
+ * An integration run's workerd outlives a test process that dies mid-run: Alchemy's sidecar,
+ * workerd's parent, exits without stopping it, so it holds its ports with pid 1 as its parent.
  *
  * @module
  */
+
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,7 +13,6 @@ import * as Duration from "effect/Duration";
 
 export interface Orphan {
   readonly pid: number;
-  /** The executable's path, as `ps -o comm=` prints it. */
   readonly command: string;
   readonly cwd: string;
 }
@@ -35,7 +33,6 @@ const output = (program: string, args: readonly string[]) => {
   }
 };
 
-/** `ps -A -o pid=,ppid=,comm=` lines, as pid, parent pid and executable. */
 export const parseProcesses = (text: string) =>
   text.split("\n").flatMap((line) => {
     const fields = /^\s*(?<pid>\d+)\s+(?<ppid>\d+)\s+(?<command>.+?)\s*$/u.exec(
@@ -54,7 +51,6 @@ export const parseProcesses = (text: string) =>
         ];
   });
 
-/** `lsof -Fpn -d cwd` output, as pid to working directory. */
 export const parseCwds = (text: string) => {
   const cwds = new Map<number, string>();
   let pid: number | undefined;
@@ -69,7 +65,6 @@ export const parseCwds = (text: string) => {
 export const isWithin = (cwd: string, directory: string) =>
   cwd === directory || cwd.startsWith(`${directory}${path.sep}`);
 
-/** The orphans whose working directory is `directory` or inside it. */
 export const orphansIn = (directory: string): readonly Orphan[] => {
   const root = fs.realpathSync(directory);
   const parentless = parseProcesses(
@@ -111,7 +106,6 @@ const signal = (pid: number, name: NodeJS.Signals) => {
   }
 };
 
-/** Sends each orphan SIGTERM, then SIGKILL to any still running after 3 s. */
 export const stopOrphans = (orphans: readonly Orphan[]) => {
   for (const { pid } of orphans) signal(pid, "SIGTERM");
   const deadline = performance.now() + Duration.toMillis(STOP_GRACE);

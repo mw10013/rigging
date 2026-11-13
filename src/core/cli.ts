@@ -1,10 +1,3 @@
-/**
- * How every rigging bin runs its command. It is internal: not in `exports`. A bin is a thin file
- * under `bin/` that hands its module's `command` to {@link runCli}, so a module never runs on
- * import and a test can import it.
- *
- * @module
- */
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as CliError from "effect/cli/CliError";

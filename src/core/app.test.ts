@@ -21,7 +21,6 @@ const manifest = (directory: string, name: string) => {
   );
 };
 
-/** A monorepo: the root and `apps/web` have manifests, `apps/web/src/deep` and `docs` do not. */
 const repository = path.join(scratch, "repository");
 fs.mkdirSync(path.join(repository, ".git"), { recursive: true });
 manifest(repository, "monorepo");

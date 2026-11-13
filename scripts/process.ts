@@ -22,7 +22,6 @@ export interface Output {
 const lastLine = (text: string) =>
   text.trim().split("\n").at(-1) ?? "no output";
 
-/** `env` is added to the inherited environment. */
 export const capture = Effect.fn("Process.capture")(function* (
   directory: string,
   program: string,
@@ -31,8 +30,6 @@ export const capture = Effect.fn("Process.capture")(function* (
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const command = [program, ...args].join(" ");
-  const fail = (detail: string) =>
-    new CommandFailedError({ command, directory, detail });
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const child = yield* spawner.spawn(
@@ -53,7 +50,12 @@ export const capture = Effect.fn("Process.capture")(function* (
       );
       return { exitCode: Number(exitCode), stdout, stderr } satisfies Output;
     }),
-  ).pipe(Effect.mapError((error) => fail(error.message)));
+  ).pipe(
+    Effect.mapError(
+      (error) =>
+        new CommandFailedError({ command, directory, detail: error.message }),
+    ),
+  );
 });
 
 export const run = Effect.fn("Process.run")(function* (
@@ -72,7 +74,6 @@ export const run = Effect.fn("Process.run")(function* (
   return output.stdout;
 });
 
-/** Streams the program's output to stderr, keeping stdout for JSON. `env` is added to the inherited environment. */
 export const stream = Effect.fn("Process.stream")(function* (
   directory: string,
   program: string,

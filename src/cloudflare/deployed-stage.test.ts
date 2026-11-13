@@ -26,7 +26,6 @@ import {
 
 const TOKEN = "9faa0f15-edb6-4265-aa27-2f944dd4c14e";
 
-/** Baton's production trigger as `cf builds triggers list` showed it on 2026-11-06. */
 const listed = (overrides: Partial<Trigger> = {}): Trigger => ({
   trigger_uuid: "2aad0c41-2dfb-4356-8af6-3d8a705c92fd",
   trigger_name: "c028ea6f87854c129e76a0f7a2e3251b",
@@ -92,7 +91,6 @@ describe("triggerDrift", () => {
   });
 });
 
-/** Lines of baton's staging `alchemy plan` as `check` captured it on 2026-11-06. */
 const PLAN = `[20:38:14.751] INFO: Plan ready (20.7s)
 [20:38:14.752] INFO: Plan: 2 to update, 1 tasks
 [20:38:14.752] INFO: [Backend] update
@@ -329,7 +327,6 @@ describe("trigger variables", () => {
   });
 });
 
-/** `cf`, `git` and `alchemy` as `ensureWebsite` calls them, reading and writing files in `$DEVKIT_FAKES`. */
 const FAKES = {
   cf: `#!/bin/sh
 case "$*" in

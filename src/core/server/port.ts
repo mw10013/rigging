@@ -19,7 +19,6 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
-/** A TCP port the OS assigned on localhost, released again before this returns. */
 const freePort = Effect.callback<number>((resume) => {
   const server = createServer();
   server.once("error", (cause) => {
@@ -41,7 +40,6 @@ const freePort = Effect.callback<number>((resume) => {
   });
 });
 
-/** Writes `{ port, url }` for a free port to the file `RIGGING_ENDPOINT` names, and returns the port. */
 export const publishFreePort = Effect.gen(function* () {
   const endpoint = yield* Config.String("RIGGING_ENDPOINT").pipe(
     Effect.mapError(
@@ -62,7 +60,6 @@ export const publishFreePort = Effect.gen(function* () {
   return port;
 });
 
-/** `rigging server port`: the bin's command, run by `bin/rigging server-port.ts` through {@link runCli}. */
 export const command = Command.make("port", {}, () =>
   publishFreePort.pipe(Effect.flatMap(Console.log)),
 ).pipe(

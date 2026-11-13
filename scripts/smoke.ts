@@ -1,15 +1,8 @@
-/**
- * `vp run smoke`: the package as npm publishes it, proved in an app. It builds `dist/`, packs it
- * with `npm pack`, installs the tarball into a copy of `fixtures/local` outside the workspace,
- * and runs the fixture's unit, browser and e2e suites there. A temporary directory with the
- * copy is removed after a pass and kept after a failure, with its `.test-results/`.
- *
- * @module
- */
 import * as path from "node:path";
 import process from "node:process";
 
-import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
