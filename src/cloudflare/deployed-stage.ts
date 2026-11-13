@@ -115,7 +115,7 @@ export type BuildStep =
   | { readonly _tag: "Update"; readonly settings: readonly string[] }
   | { readonly _tag: "Delete"; readonly repoName: string };
 
-/** A configuration on another repository is replaced, since an update cannot move it. */
+/** Builds' update cannot change a configuration's repository. */
 export const buildPlan = (
   canonical: CanonicalBuild,
   repoName: string,
@@ -387,11 +387,6 @@ const readPlan = Effect.fn("DeployedStage.readPlan")(function* (
   };
 });
 
-/**
- * Creating the configuration connects the app's repository to Builds by GitHub's ids, which only
- * works once the owner has given the Cloudflare GitHub App access to the repository. The API
- * requires previews' settings even with previews off, so they repeat production's.
- */
 const ensureBuild = Effect.fn("DeployedStage.ensureBuild")(function* (
   stage: Deployed,
   tag: string,
@@ -419,10 +414,18 @@ const ensureBuild = Effect.fn("DeployedStage.ensureBuild")(function* (
                 branch: canonical.branch,
               },
               production_settings: canonical.production_settings,
+              // The API requires previews' settings even with previews off.
               previews_base_config: canonical.production_settings,
               previews_enabled: canonical.previews_enabled,
             }),
-          ]);
+          ]).pipe(
+            Effect.mapError(
+              (error) =>
+                new StageError({
+                  message: `${error.message}\nBuilds reaches ${repo.owner}/${repo.name} through the Cloudflare GitHub App, which needs access to it; only the owner can grant that`,
+                }),
+            ),
+          );
         });
       }
       case "Update": {
@@ -462,7 +465,6 @@ const ensureBuild = Effect.fn("DeployedStage.ensureBuild")(function* (
   return after.config.value;
 });
 
-/** One update: a variable set to `null` is deleted. */
 const syncVariables = Effect.fn("DeployedStage.syncVariables")(function* (
   tag: string,
   variables: readonly StageVariable[],
@@ -488,6 +490,7 @@ const syncVariables = Effect.fn("DeployedStage.syncVariables")(function* (
                 { value: Redacted.value(value), is_secret: secret },
               ]),
             ),
+            // Builds deletes a variable set to `null`.
             ...Object.fromEntries(stale.map((name) => [name, null])),
           },
         },
@@ -522,8 +525,8 @@ const requireBranchCheckout = Effect.fn("DeployedStage.requireBranchCheckout")(
 
 /**
  * The Website's tag. A stage with none gets its first deploy here, since a build configuration
- * is keyed to the Worker's tag: Alchemy from this checkout, once {@link requireBranchCheckout} passes,
- * with the file's values in its environment as Builds passes them.
+ * is keyed to the Worker's tag: Alchemy from this checkout, once {@link requireBranchCheckout}
+ * passes, with the file's values in its environment as Builds passes them.
  */
 export const ensureWebsite = Effect.fn("DeployedStage.ensureWebsite")(
   function* (stage: Deployed, variables: readonly StageVariable[]) {
