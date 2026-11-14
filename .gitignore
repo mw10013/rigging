@@ -6,3 +6,4 @@ coverage/
 .rigging/
 .test-results/
 /refs
+.vitest/
