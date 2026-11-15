@@ -6,7 +6,14 @@ import * as path from "node:path";
 import * as Option from "effect/Option";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { listenerOf, RunId, runOutput, ServerName, stateOf } from "./domain.ts";
+import {
+  listenerOf,
+  runFailure,
+  RunId,
+  runOutput,
+  ServerName,
+  stateOf,
+} from "./domain.ts";
 
 const ENTRY = path.resolve(import.meta.dirname, "../../bin/rigging.ts");
 
@@ -27,6 +34,10 @@ server.listen(0, "127.0.0.1", () => {
   console.error("a stderr line");
   writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
 });
+if (process.argv[2] === "apply-failed") {
+  console.log("ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql");
+  console.log("ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.");
+}
 if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(() => process.exit(0)); });
 }
 `;
@@ -40,6 +51,7 @@ interface Printed {
   readonly log: string;
   readonly group: number;
   readonly pid: number;
+  readonly failure: string | null;
   readonly error: { readonly _tag: string; readonly message: string };
 }
 
@@ -101,7 +113,10 @@ describe("rigging server", () => {
     expect(adopted.json.run).toBe(started.json.run);
     expect(adopted.stderr).toContain("adopted");
 
-    expect(server("status", "dev").json.state).toBe("running");
+    const now = server("status", "dev");
+    expect(now.code).toBe(0);
+    expect(now.json.state).toBe("running");
+    expect(now.json.failure).toBeNull();
     expect(started.json.log).toBe(".rigging/servers/dev/log/current");
     expect(
       execFileSync("git", ["status", "--porcelain"], {
@@ -145,6 +160,31 @@ describe("rigging server", () => {
         "utf8",
       ),
     ).toContain(`==== dev exit run=${started.json.run} code=0`);
+  }, 60_000);
+
+  it("reports a server that logged a failed apply as degraded, and keeps it running", () => {
+    const started = server(
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "apply-failed",
+    );
+    expect(started.code).toBe(1);
+    expect(started.json.error._tag).toBe("ServerDegradedError");
+    expect(started.json.error.message).toContain("alchemy dev: apply failed");
+    expect(started.json.error.message).toContain(
+      "RewrittenMigrationHistoryError",
+    );
+
+    const now = server("status", "dev");
+    expect(now.code).toBe(3);
+    expect(now.json.state).toBe("degraded");
+    expect(now.json.failure).toContain("alchemy dev: apply failed");
+    expect(alive(now.json.group)).toBe(true);
+    expect(server("start", "dev", "--", "node", "server.mjs").code).toBe(1);
+    expect(server("status", "dev").json.run).toBe(now.json.run);
   }, 60_000);
 
   it("logs the exit of a server that SIGTERM ends without its own handler", () => {
@@ -249,6 +289,53 @@ describe("runOutput", () => {
   });
 });
 
+describe("runFailure", () => {
+  const name = ServerName.make("dev");
+  const run = RunId.make("0123abcd");
+  const APPLY_FAILED =
+    "ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.";
+  const runLog = (...lines: string[]) =>
+    [
+      "t0  ==== dev start 2026 run=ffffffff",
+      `t1  ${APPLY_FAILED}`,
+      "t2  ==== dev exit run=ffffffff code=0",
+      "t3  ==== dev start 2026 run=0123abcd",
+      ...lines.map((line) => `t4  ${line}`),
+    ].join("\n");
+
+  it("names the failed apply the run logged", () => {
+    expect(
+      runFailure(runLog("[Backend] fail (local)", APPLY_FAILED), name, run),
+    ).toEqual(
+      Option.some(
+        "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.",
+      ),
+    );
+  });
+
+  it("ignores an earlier run's failure and routine output", () => {
+    expect(
+      runFailure(
+        runLog("1 test failed", "ERROR: fetch failed; retrying"),
+        name,
+        run,
+      ),
+    ).toEqual(Option.none());
+  });
+
+  it("clears once the stack reloads, and fires again when the reload fails", () => {
+    const reloaded = "Reloading stack: changed src/backend.ts";
+    expect(runFailure(runLog(APPLY_FAILED, reloaded), name, run)).toEqual(
+      Option.none(),
+    );
+    expect(
+      Option.isSome(
+        runFailure(runLog(APPLY_FAILED, reloaded, APPLY_FAILED), name, run),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("stateOf", () => {
   const record = Option.some({
     rigging: 1 as const,
@@ -262,19 +349,45 @@ describe("stateOf", () => {
 
   it("reads a dead runner with a live group as orphaned", () => {
     expect(
-      stateOf(record, { runner: false, group: true, answering: true }),
+      stateOf(record, {
+        runner: false,
+        group: true,
+        answering: true,
+        failed: false,
+      }),
     ).toBe("orphaned");
   });
 
   it("reads a record with nothing alive as stopped", () => {
     expect(
-      stateOf(record, { runner: false, group: false, answering: false }),
+      stateOf(record, {
+        runner: false,
+        group: false,
+        answering: false,
+        failed: false,
+      }),
     ).toBe("stopped");
+  });
+
+  it("reads a live runner whose command logged a failure as degraded, though it answers", () => {
+    expect(
+      stateOf(record, {
+        runner: true,
+        group: true,
+        answering: true,
+        failed: true,
+      }),
+    ).toBe("degraded");
   });
 
   it("reads a live runner that does not answer yet as starting", () => {
     expect(
-      stateOf(record, { runner: true, group: true, answering: false }),
+      stateOf(record, {
+        runner: true,
+        group: true,
+        answering: false,
+        failed: false,
+      }),
     ).toBe("starting");
   });
 });
