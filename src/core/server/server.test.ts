@@ -34,6 +34,11 @@ server.listen(0, "127.0.0.1", () => {
   console.error("a stderr line");
   writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
 });
+const settle = { "late-fail": ["[t] INFO: Failed: 0 succeeded, 4 failed (3.2s)", "[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving."], "late-done": ["[t] INFO: Done: 6 succeeded (10.0s)"] }[process.argv[2]];
+if (settle) {
+  console.log("[t] INFO: Dev · dev-test");
+  setTimeout(() => settle.forEach((line) => console.log(line)), 3000);
+}
 if (process.argv[2] === "apply-failed") {
   console.log("ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql");
   console.log("ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.");
@@ -185,6 +190,35 @@ describe("rigging server", () => {
     expect(alive(now.json.group)).toBe(true);
     expect(server("start", "dev", "--", "node", "server.mjs").code).toBe(1);
     expect(server("status", "dev").json.run).toBe(now.json.run);
+  }, 60_000);
+
+  it("fails a start whose apply fails after the port answers", () => {
+    const started = server(
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "late-fail",
+    );
+    expect(started.code).toBe(1);
+    expect(started.json.error._tag).toBe("ServerDegradedError");
+    expect(started.json.error.message).toContain("alchemy dev: apply failed");
+    expect(server("status", "dev").json.state).toBe("degraded");
+  }, 60_000);
+
+  it("returns running once the apply is done, not when the port first answers", () => {
+    const started = server(
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "late-done",
+    );
+    expect(started.code).toBe(0);
+    expect(started.json.state).toBe("running");
+    expect(log()).toContain("Done: 6 succeeded");
   }, 60_000);
 
   it("logs the exit of a server that SIGTERM ends without its own handler", () => {
