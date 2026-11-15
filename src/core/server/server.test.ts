@@ -27,6 +27,10 @@ server.listen(0, "127.0.0.1", () => {
   console.error("a stderr line");
   writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
 });
+if (process.argv[2] === "apply-failed") {
+  console.log("ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql");
+  console.log("ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.");
+}
 if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(() => process.exit(0)); });
 }
 `;
@@ -40,6 +44,7 @@ interface Printed {
   readonly log: string;
   readonly group: number;
   readonly pid: number;
+  readonly failure: string | null;
   readonly error: { readonly _tag: string; readonly message: string };
 }
 
@@ -101,7 +106,10 @@ describe("rigging server", () => {
     expect(adopted.json.run).toBe(started.json.run);
     expect(adopted.stderr).toContain("adopted");
 
-    expect(server("status", "dev").json.state).toBe("running");
+    const now = server("status", "dev");
+    expect(now.code).toBe(0);
+    expect(now.json.state).toBe("running");
+    expect(now.json.failure).toBeNull();
     expect(started.json.log).toBe(".rigging/servers/dev/log/current");
     expect(
       execFileSync("git", ["status", "--porcelain"], {
@@ -145,6 +153,31 @@ describe("rigging server", () => {
         "utf8",
       ),
     ).toContain(`==== dev exit run=${started.json.run} code=0`);
+  }, 60_000);
+
+  it("reports a server that logged a failed apply as degraded, and keeps it running", () => {
+    const started = server(
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "apply-failed",
+    );
+    expect(started.code).toBe(1);
+    expect(started.json.error._tag).toBe("ServerDegradedError");
+    expect(started.json.error.message).toContain("alchemy dev: apply failed");
+    expect(started.json.error.message).toContain(
+      "RewrittenMigrationHistoryError",
+    );
+
+    const now = server("status", "dev");
+    expect(now.code).toBe(3);
+    expect(now.json.state).toBe("degraded");
+    expect(now.json.failure).toContain("alchemy dev: apply failed");
+    expect(alive(now.json.group)).toBe(true);
+    expect(server("start", "dev", "--", "node", "server.mjs").code).toBe(1);
+    expect(server("status", "dev").json.run).toBe(now.json.run);
   }, 60_000);
 
   it("logs the exit of a server that SIGTERM ends without its own handler", () => {
