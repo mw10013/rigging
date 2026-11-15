@@ -108,7 +108,11 @@ export type Apply =
   | { readonly _tag: "None" }
   | { readonly _tag: "Applying" }
   | { readonly _tag: "Applied" }
-  | { readonly _tag: "Failed"; readonly failure: string };
+  | {
+      readonly _tag: "Failed";
+      readonly failure: string;
+      readonly diagnostic: string | null;
+    };
 
 /**
  * How `alchemy dev` logs each apply. Its `Dev · <stage>` banner, or `Reloading stack:` after a
@@ -122,18 +126,55 @@ const APPLY_EVENTS: readonly (readonly [RegExp, (text: string) => Apply])[] = [
   [/\] INFO: Done: \d+ succeeded/u, () => ({ _tag: "Applied" })],
   [
     /Failed: \d+ succeeded.*|alchemy dev: (?:(?:apply|run) failed;|\w+ was interrupted internally) .*/u,
-    (failure) => ({ _tag: "Failed", failure }),
+    (failure) => ({ _tag: "Failed", failure, diagnostic: null }),
   ],
 ];
 
+/**
+ * Alchemy logs a failure report as one record, `alchemy dev: … failed; …` and then its cause on
+ * the following lines, so the line after the header carries only `s6-log`'s timestamp and starts
+ * with the cause's `<Tag>: <message>`.
+ */
+const REPORT = /^alchemy dev: (?:apply|run) failed;/u;
+const S6_STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ {2}/u;
+
+/** `[<fqn>] fail (<mode>) — <Tag>: <message> (<elapsed>)`, which a resource logs as it fails. */
+const RESOURCE_FAILURE =
+  /\] ERROR: \[[^\]]+\] fail(?: \([^)]*\))? — (?<message>.+?)(?: {1,2}\((?:\d+(?:\.\d+)?(?:ms|[smh]) ?)+\))?$/u;
+
+const reportDiagnostic = (line: string) => {
+  const text = line.replace(S6_STAMP, "");
+  return text === "" || /^[\s[]/u.test(text) || text.startsWith(MARKER)
+    ? null
+    : text;
+};
+
 export const applyOf = (log: string, name: ServerName, run: RunId): Apply => {
   let apply: Apply = { _tag: "None" };
-  for (const line of Option.getOrElse(runLines(log, name, run), () => []))
+  let pendingReport = false;
+  let diagnostic: string | null = null;
+  let firstResourceFailure: string | null = null;
+  for (const line of Option.getOrElse(runLines(log, name, run), () => [])) {
+    if (pendingReport) {
+      diagnostic = reportDiagnostic(line);
+      pendingReport = false;
+    }
+    firstResourceFailure ??=
+      RESOURCE_FAILURE.exec(line)?.groups?.message ?? null;
     for (const [pattern, event] of APPLY_EVENTS) {
       const found = pattern.exec(line);
-      if (found !== null) apply = event(found[0]);
+      if (found === null) continue;
+      apply = event(found[0]);
+      if (apply._tag === "Failed") pendingReport = REPORT.test(found[0]);
+      else {
+        diagnostic = null;
+        firstResourceFailure = null;
+      }
     }
-  return apply;
+  }
+  return apply._tag === "Failed"
+    ? { ...apply, diagnostic: diagnostic ?? firstResourceFailure }
+    : apply;
 };
 
 /**

@@ -1,0 +1,58 @@
+2026-11-15 03:24:53.894127500  ==== dev start 2026-11-15T08:24:53.781Z run=2765bcc1 stage=dev-mw
+2026-11-15 03:24:53.985005500  $ bash -c 'stage=$(vpx scripts/stage.ts "${SANDBOX_ENVIRONMENT:-dev}") && port=$(rigging server port) && { [ "${SANDBOX_ENVIRONMENT:-dev}" != dev ] || . scripts/stripe-listen.sh "$port"; } && env -u FORCE_COLOR NO_COLOR=1 WEBSITE_PORT=$port alchemy dev --stage "$stage"; kill -TERM 0' ⊘ cache disabled
+2026-11-15 03:24:58.690195500  A newer version of the Stripe CLI is available, please update to: v1.55.11
+2026-11-15 03:24:58.690200500  Run brew upgrade stripe to upgrade.
+2026-11-15 03:24:58.752646500  Getting ready...
+2026-11-15 03:24:59.723101500  Ready! You are using Stripe API Version [2025-05-28.basil]. Your webhook signing secret is whsec_SENTINEL (^C to quit)
+2026-11-15 03:25:00.166062500  [03:25:00.159] WARN: alchemy 2.0.0-beta.87 is available (you're on 2.0.0-beta.86). Run `pnpm add alchemy@2.0.0-beta.87` to upgrade.
+2026-11-15 03:25:00.926656500  [03:25:00.922] INFO: Dev · dev-mw
+2026-11-15 03:25:00.926791500  [03:25:00.926] INFO: Importing stack module
+2026-11-15 03:25:10.795649500  [03:25:10.795] INFO: Resolving stack services
+2026-11-15 03:25:10.845908500  [03:25:10.845] INFO: Loading stack state
+2026-11-15 03:25:11.592894500  [03:25:11.592] INFO: Computing plan
+2026-11-15 03:25:12.771482500  [03:25:12.771] INFO: workerd/jsg/util.c++:410: error: e = workerd/util/sqlite.c++:1772: failed: SQLite failed; dbErrorMessage(err, db) = attempt to write a readonly database: SQLITE_READONLY
+2026-11-15 03:25:12.771612500  [03:25:12.771] INFO: stack: 1064536a3 1064600bf 106471947 1064716ab 1063db2b7 105e1ea3f 1052d4a07 1052d4673 106793c4b 106791f9f 10678f183 10678ee7b 106af24a3 106af17bf 1084e82eb 1052bc017 105e6969b 105e68efb 105e68d4b 105e68423 106793c4b 1068d6003 1067bfbc3 10678f07b 106af245b 106af2a33 106af2b73 106b09353 106b0920f 106635edf 105d536db 105d5301f 105d47eff 105d43817 105d394bb 105e26d23 105e2b1bb 1083fd7af 1083fe4ff 108406ce3 1083fc63f 105ce221b 105ce326b 1050755a3 104ec19b3 104f1dda3 105cdc423 105059baf 105cd128b 104eeee4b 104e407ef 104e42907 104e3400b 104e34023 1084677af 104e34083 18aa684e3; sentryErrorContext = jsgInternalError; wdErrId = 0noqqhrnlvlcjl520b4onfln; sentryTag = SENTRY_DO
+2026-11-15 03:25:12.949330500  [03:25:12.948] INFO: Plan ready (12.0s)
+2026-11-15 03:25:12.950193500  [03:25:12.950] INFO: Plan: 3 to update, 4 binding changes, 2 tasks
+2026-11-15 03:25:12.950260500  [03:25:12.950] INFO: [Backend] update (local)
+2026-11-15 03:25:12.950309500  [03:25:12.950] INFO: [Backend/AuthEmail] noop
+2026-11-15 03:25:12.950401500  [03:25:12.950] INFO: [Backend/AuthOrigin] update
+2026-11-15 03:25:12.950454500  [03:25:12.950] INFO: [Backend/Database] update
+2026-11-15 03:25:12.950516500  [03:25:12.950] INFO: [Backend/Debug] noop
+2026-11-15 03:25:12.950582500  [03:25:12.950] INFO: [Backend/MailDelivery] noop
+2026-11-15 03:25:12.950643500  [03:25:12.950] INFO: [Backend/OrganizationActor] create
+2026-11-15 03:25:12.950732500  [03:25:12.950] INFO: [BetterAuthSecret] noop
+2026-11-15 03:25:12.950792500  [03:25:12.950] INFO: [Database] update (local)
+2026-11-15 03:25:12.950852500  [03:25:12.950] INFO: [Website] update (local)
+2026-11-15 03:25:12.950913500  [03:25:12.950] INFO: [Website/BACKEND] update
+2026-11-15 03:25:12.950968500  [03:25:12.950] INFO: [AdminSeed] run [action]
+2026-11-15 03:25:12.951027500  [03:25:12.950] INFO: [BetterAuthMigrate] run [action]
+2026-11-15 03:25:12.951085500  [03:25:12.951] INFO: 
+2026-11-15 03:25:12.956087500  [03:25:12.955] INFO: [Database] updating (local)
+2026-11-15 03:25:12.956517500  [03:25:12.956] INFO: [Website] updating (local)
+2026-11-15 03:25:13.036097500  [03:25:13.035] ERROR: [AdminSeed] fail — RewrittenMigrationHistoryError: Applied migration history in "__alchemy_migrations" does not match the local files (changed 0001_init.sql). Add a new forward migration instead of editing or deleting already-applied files.
+2026-11-15 03:25:13.036169500  [03:25:13.035] ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: Applied migration history in "__alchemy_migrations" does not match the local files (changed 0001_init.sql). Add a new forward migration instead of editing or deleting already-applied files.
+2026-11-15 03:25:13.036302500  [03:25:13.036] ERROR: [BetterAuthMigrate] fail — RewrittenMigrationHistoryError: Applied migration history in "__alchemy_migrations" does not match the local files (changed 0001_init.sql). Add a new forward migration instead of editing or deleting already-applied files.
+2026-11-15 03:25:13.036370500  [03:25:13.036] ERROR: [Database] fail (local) — RewrittenMigrationHistoryError: Applied migration history in "__alchemy_migrations" does not match the local files (changed 0001_init.sql). Add a new forward migration instead of editing or deleting already-applied files. (81ms)
+2026-11-15 03:25:17.247176500  [03:25:17.245] INFO: [Website] Re-optimizing dependencies because lockfile has changed
+2026-11-15 03:25:19.214585500  [03:25:19.213] INFO: [Website] Re-optimizing dependencies because lockfile has changed
+2026-11-15 03:25:19.235686500  [03:25:19.234] INFO: [Website] Started in 6276ms → http://localhost:51190/
+2026-11-15 03:25:19.237957500  [03:25:19.237] INFO: [Website] ready at http://localhost:51190
+2026-11-15 03:25:19.238231500  [03:25:19.238] INFO: 
+2026-11-15 03:25:19.238297500  [03:25:19.238] INFO: Failed: 0 succeeded, 4 failed (6.3s)
+2026-11-15 03:25:19.238401500  [03:25:19.238] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.
+2026-11-15 03:25:19.238405500  RewrittenMigrationHistoryError: Applied migration history in "__alchemy_migrations" does not match the local files (changed 0001_init.sql). Add a new forward migration instead of editing or deleting already-applied files.
+2026-11-15 03:25:19.238407500      at <anonymous> (/Users/mw/projects/saas/node_modules/.pnpm/@alchemy.run+sql@2.0.0-beta.86_alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@_5634f5bd5e6b294e89fe8cc25a339b68/node_modules/@alchemy.run/sql/src/Migrations/AlchemyFormat.ts:373:21)
+2026-11-15 03:25:19.238407500      at Effect.fn (/Users/mw/projects/saas/node_modules/.pnpm/effect@4.1.4/node_modules/effect/src/Pipeable.ts:574:29)
+2026-11-15 03:25:19.238409500      at Effect.fn (definition) (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Auth/Demand.ts:106:10)
+2026-11-15 03:25:19.238415500      at provider.update (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Apply.ts:165:14)
+2026-11-15 03:25:19.238417500      at apply.resource (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Apply.ts:1523:12)
+2026-11-15 03:25:19.238418500      at Effect.fn (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Apply.ts:356:12)
+2026-11-15 03:25:19.238420500      at Effect.fn (definition) (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Apply.ts:447:28)
+2026-11-15 03:25:19.238430500      at apply (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Apply.ts:432:12)
+2026-11-15 03:25:19.238431500      at Alchemist.build (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Alchemist/Operations.ts:280:24)
+2026-11-15 03:25:19.238434500      at Alchemist.build (definition) (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Alchemist/Operations.ts:110:34)
+2026-11-15 03:25:19.238435500      at Alchemist.plan (/Users/mw/projects/saas/node_modules/.pnpm/alchemy@2.0.0-beta.86_@effect+platform-bun@4.1.4_effect@4.1.4__@effect+platform-node@4._2331765b6375fcba1e01f6c121affdbc/node_modules/alchemy/src/Cli/exec.ts:74:17)
+2026-11-15 11:46:41.086422500  
+2026-11-15 11:46:41.086448500  Exited.
+2026-11-15 11:46:41.496443500  ==== dev exit run=2765bcc1 signal=SIGTERM
