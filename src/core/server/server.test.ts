@@ -41,8 +41,10 @@ if (settle) {
   setTimeout(() => settle.filter((line) => !quiet || line.includes("ERROR")).forEach((line) => console.log(line)), 3000);
 }
 if (process.argv[2] === "apply-failed") {
-  console.log("ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql");
-  console.log("ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.");
+  console.log("Ready! Your webhook signing secret is whsec_SENTINEL (^C to quit)");
+  console.log("[t] ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql (81ms)");
+  console.log("[t] INFO: Failed: 0 succeeded, 1 failed (6.3s)");
+  console.log("[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.\\nRewrittenMigrationHistoryError: changed 0001_init.sql\\n    at migrate (migrations.ts:1:1)\\n    at apply (Apply.ts:2:2)");
 }
 if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(() => process.exit(0)); });
 }
@@ -58,6 +60,7 @@ interface Printed {
   readonly group: number;
   readonly pid: number;
   readonly failure: string | null;
+  readonly diagnostic: string | null;
   readonly error: { readonly _tag: string; readonly message: string };
 }
 
@@ -71,6 +74,7 @@ const serverWith = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) => {
   });
   return {
     code: result.status,
+    stdout: result.stdout,
     json: (result.stdout.trim() === ""
       ? undefined
       : JSON.parse(result.stdout)) as Printed,
@@ -127,6 +131,7 @@ describe("rigging server", () => {
     expect(now.code).toBe(0);
     expect(now.json.state).toBe("running");
     expect(now.json.failure).toBeNull();
+    expect(now.json.diagnostic).toBeNull();
     expect(started.json.log).toBe(".rigging/servers/dev/log/current");
     expect(
       execFileSync("git", ["status", "--porcelain"], {
@@ -181,17 +186,31 @@ describe("rigging server", () => {
       "server.mjs",
       "apply-failed",
     );
-    expect(started.code).toBe(1);
-    expect(started.json.error._tag).toBe("ServerDegradedError");
-    expect(started.json.error.message).toContain("alchemy dev: apply failed");
-    expect(started.json.error.message).toContain(
-      "RewrittenMigrationHistoryError",
-    );
-
     const now = server("status", "dev");
+    const message = `the dev server logged a failure (run ${now.json.run}); it is still running
+RewrittenMigrationHistoryError: changed 0001_init.sql
+see .rigging/servers/dev/log/current`;
+    expect(started.code).toBe(1);
+    expect(started.json.error).toEqual({
+      _tag: "ServerDegradedError",
+      message,
+    });
+    expect(started.stderr).toBe(
+      `ok    started the dev server (run ${now.json.run})\nerror ${message}\n`,
+    );
+    for (const leak of ["whsec_SENTINEL", "    at ", "--- "]) {
+      expect(started.stdout).not.toContain(leak);
+      expect(started.stderr).not.toContain(leak);
+    }
+
     expect(now.code).toBe(3);
     expect(now.json.state).toBe("degraded");
-    expect(now.json.failure).toContain("alchemy dev: apply failed");
+    expect(now.json.failure).toBe(
+      "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.",
+    );
+    expect(now.json.diagnostic).toBe(
+      "RewrittenMigrationHistoryError: changed 0001_init.sql",
+    );
     expect(alive(now.json.group)).toBe(true);
     expect(server("start", "dev", "--", "node", "server.mjs").code).toBe(1);
     expect(server("status", "dev").json.run).toBe(now.json.run);
@@ -402,6 +421,7 @@ describe("applyOf", () => {
     ).toEqual({
       _tag: "Failed",
       failure: "Failed: 0 succeeded, 4 failed (3.2s)",
+      diagnostic: null,
     });
     expect(
       applyOf(
@@ -417,6 +437,7 @@ describe("applyOf", () => {
       _tag: "Failed",
       failure:
         "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.",
+      diagnostic: null,
     });
   });
 
@@ -467,6 +488,165 @@ describe("applyOf", () => {
   });
 });
 
+describe("applyOf's diagnostic", () => {
+  const name = ServerName.make("dev");
+  const run = RunId.make("2765bcc1");
+  const recorded = fs
+    .readFileSync(
+      path.join(import.meta.dirname, "fixtures/apply-failed.log"),
+      "utf8",
+    )
+    .split("\n");
+  const STAMP = "2026-11-15 03:25:19.238405500  ";
+  const START = `${STAMP}==== dev start 2026-11-15T08:24:53.781Z run=2765bcc1`;
+  const FAILURE =
+    "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.";
+  const DIAGNOSTIC =
+    'RewrittenMigrationHistoryError: Applied migration history in "__alchemy_migrations" does not match the local files (changed 0001_init.sql). Add a new forward migration instead of editing or deleting already-applied files.';
+  const throughSummary = recorded.slice(
+    0,
+    recorded.findIndex((line) => line.includes("] INFO: Failed: ")) + 1,
+  );
+  const applyOfLines = (lines: readonly string[]) =>
+    applyOf(lines.join("\n"), name, run);
+  const stamped = (...lines: string[]) =>
+    applyOfLines([START, ...lines.map((line) => STAMP + line)]);
+
+  it("names the cause alchemy reported after a failed apply, not the stack or the exit", () => {
+    expect(applyOfLines(recorded)).toEqual({
+      _tag: "Failed",
+      failure: FAILURE,
+      diagnostic: DIAGNOSTIC,
+    });
+  });
+
+  it("names the first resource's failure while the report is not written yet", () => {
+    expect(applyOfLines(throughSummary)).toEqual({
+      _tag: "Failed",
+      failure: "Failed: 0 succeeded, 4 failed (6.3s)",
+      diagnostic: DIAGNOSTIC,
+    });
+  });
+
+  it("drops the elapsed time from a resource's failure", () => {
+    expect(
+      applyOfLines(
+        throughSummary.filter(
+          (line) =>
+            !/\[(?:AdminSeed|Backend|BetterAuthMigrate)\] fail/u.test(line),
+        ),
+      ),
+    ).toMatchObject({ diagnostic: DIAGNOSTIC });
+  });
+
+  it("names a reload's own failure, never the one before it", () => {
+    const reload = "[t] INFO: Reloading stack: changed src/backend.ts";
+    expect(
+      applyOfLines([
+        ...throughSummary,
+        STAMP + reload,
+        `${STAMP}[t] ERROR: [Backend] fail (local) — TypeError: x is not a function (1.2s)`,
+        `${STAMP}[t] INFO: Failed: 0 succeeded, 1 failed (1.3s)`,
+        `${STAMP}[t] ERROR: ${FAILURE}`,
+        `${STAMP}TypeError: x is not a function`,
+        `${STAMP}    at y (backend.ts:1:1)`,
+      ]),
+    ).toEqual({
+      _tag: "Failed",
+      failure: FAILURE,
+      diagnostic: "TypeError: x is not a function",
+    });
+    expect(
+      applyOfLines([
+        ...throughSummary,
+        STAMP + reload,
+        `${STAMP}[t] INFO: Failed: 0 succeeded, 1 failed (1.3s)`,
+      ]),
+    ).toEqual({
+      _tag: "Failed",
+      failure: "Failed: 0 succeeded, 1 failed (1.3s)",
+      diagnostic: null,
+    });
+    expect(
+      applyOfLines([
+        ...throughSummary,
+        STAMP + reload,
+        `${STAMP}[t] INFO: Done: 4 succeeded (1s)`,
+      ]),
+    ).toEqual({ _tag: "Applied" });
+  });
+
+  it("names the cause of a failure before any apply, in the shape alchemy's exec.ts logs it", () => {
+    expect(
+      stamped(
+        "[t] INFO: Dev · dev-mw",
+        "[t] ERROR: alchemy dev: run failed; waiting for the next file change to retry.",
+        "SyntaxError: Unexpected token '}'",
+        "    at parse (alchemy.run.ts:3:1)",
+      ),
+    ).toEqual({
+      _tag: "Failed",
+      failure:
+        "alchemy dev: run failed; waiting for the next file change to retry.",
+      diagnostic: "SyntaxError: Unexpected token '}'",
+    });
+  });
+
+  it("names no cause for an internally interrupted apply", () => {
+    expect(
+      stamped(
+        "[t] INFO: Dev · dev-mw",
+        "[t] ERROR: alchemy dev: apply was interrupted internally (a bug in a provider or the engine — please report it with the trace below); keeping dev alive so healthy resources keep serving.",
+        "All fibers interrupted without error",
+      ),
+    ).toMatchObject({ _tag: "Failed", diagnostic: null });
+  });
+
+  it("names no cause when the report has none, and never alchemy's exit", () => {
+    expect(
+      stamped(
+        "[t] INFO: Dev · dev-mw",
+        "[t] INFO: Failed: 0 succeeded, 1 failed (1s)",
+        `[t] ERROR: ${FAILURE}`,
+        "    at apply (Apply.ts:1:1)",
+        "",
+        "Exited.",
+        "==== dev exit run=2765bcc1 signal=SIGTERM",
+      ),
+    ).toEqual({ _tag: "Failed", failure: FAILURE, diagnostic: null });
+    expect(
+      stamped(
+        "[t] INFO: Dev · dev-mw",
+        `[t] ERROR: ${FAILURE}`,
+        "==== dev exit run=2765bcc1 signal=SIGTERM",
+      ),
+    ).toEqual({ _tag: "Failed", failure: FAILURE, diagnostic: null });
+  });
+
+  it("ignores workerd's SQLite errors, which alchemy logs at info in healthy applies too", () => {
+    const sqlite =
+      "[t] INFO: workerd/jsg/util.c++:410: error: e = workerd/util/sqlite.c++:1772: failed: SQLite failed; dbErrorMessage(err, db) = attempt to write a readonly database: SQLITE_READONLY";
+    expect(
+      stamped(
+        "[t] INFO: Dev · dev-mw",
+        sqlite,
+        "[t] INFO: Done: 6 succeeded (1s)",
+      ),
+    ).toEqual({ _tag: "Applied" });
+    expect(
+      stamped(
+        "[t] INFO: Dev · dev-mw",
+        sqlite,
+        "[t] INFO: Failed: 0 succeeded, 1 failed (1s)",
+      ),
+    ).toEqual({
+      _tag: "Failed",
+      failure: "Failed: 0 succeeded, 1 failed (1s)",
+      diagnostic: null,
+    });
+  });
+});
+
 describe("stateOf", () => {
   const record = Option.some({
     rigging: 1 as const,
@@ -506,7 +686,7 @@ describe("stateOf", () => {
         runner: true,
         group: true,
         answering: true,
-        apply: { _tag: "Failed", failure: "x" },
+        apply: { _tag: "Failed", failure: "x", diagnostic: null },
       }),
     ).toBe("degraded");
   });

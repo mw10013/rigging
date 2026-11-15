@@ -28,7 +28,8 @@ rigging server port                # pick a free port, publish it, print it
   another process holds fails the start with `PortTakenError`, which names the
   holder's pid, command and working directory, and stops the server. A server
   whose command logs a failure fails the start with `ServerDegradedError`,
-  which names the failure and carries that run's log lines, and keeps running.
+  and keeps running. Its message names Alchemy's diagnostic, or the failure
+  line when there is none, and points to the log; it quotes no log lines.
 - `status` prints the status JSON. It exits 0 when the server answers and has
   logged no failure, and 3 otherwise.
 - `stop` sends SIGTERM to the command's process group, waits for the exit to
@@ -70,6 +71,7 @@ printf '{"port":%s,"url":"%s"}' "$BACKEND_PORT" "$APP_URL" > "$RIGGING_ENDPOINT"
   "port": 50713,
   "url": "https://example.trycloudflare.com",
   "failure": null,
+  "diagnostic": null,
   "log": ".rigging/servers/dev/log/current"
 }
 ```
@@ -82,7 +84,14 @@ banner, or `Reloading stack:` after a file change, starts an apply, and the serv
 reads `starting` until a `Done:` or `Failed:` summary ends it. A failed apply
 reads `degraded`. Alchemy stays up after it, so the resources that did apply keep
 serving. `failure` holds the failure line (`alchemy dev: apply failed; …`), and
-is null in every other state. The next reload starts a new apply. A command that
+is null in every other state. `diagnostic` holds what Alchemy said went wrong,
+such as `RewrittenMigrationHistoryError: Applied migration history … does not
+match the local files (changed 0001_init.sql). …`. It is the line right after
+Alchemy's `alchemy dev: … failed;` report, or, until that report is written or
+when it has none, the message of the first resource that logged `fail` in the
+apply. It is null when neither exists, as after an internally interrupted
+apply, and in every state but `degraded`. The next reload starts a new apply,
+and its diagnostic is its own. A command that
 logs none of these lines is read by its port alone.
 
 The apply lines come from Alchemy's plain console output. Only a failed apply

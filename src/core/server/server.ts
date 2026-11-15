@@ -81,11 +81,12 @@ export class ServerDegradedError extends Schema.TaggedError<ServerDegradedError>
     name: Schema.String,
     run: Schema.String,
     failure: Schema.String,
-    output: Schema.String,
+    diagnostic: Schema.NullOr(Schema.String),
+    log: Schema.String,
   },
 ) {
   override get message() {
-    return `the ${this.name} server logged a failure (run ${this.run}); it is still running\n${this.failure}\n${this.output}`;
+    return `the ${this.name} server logged a failure (run ${this.run}); it is still running\n${this.diagnostic ?? this.failure}\nsee ${this.log}`;
   }
 }
 
@@ -440,6 +441,7 @@ export interface StatusJson {
   readonly port: number | null;
   readonly url: string | null;
   readonly failure: string | null;
+  readonly diagnostic: string | null;
   readonly log: string;
 }
 
@@ -474,6 +476,8 @@ const sight = Effect.fn("Server.sight")(function* (
   const live = state !== "stopped";
   const recorded = live ? Option.getOrUndefined(record) : undefined;
   const published = live ? Option.getOrUndefined(endpoint) : undefined;
+  const failed =
+    state === "degraded" && apply._tag === "Failed" ? apply : undefined;
   const status: StatusJson = {
     rigging: 1,
     name,
@@ -484,8 +488,8 @@ const sight = Effect.fn("Server.sight")(function* (
     startedAt: recorded?.startedAt ?? null,
     port: published?.port ?? null,
     url: published?.url ?? null,
-    failure:
-      state === "degraded" && apply._tag === "Failed" ? apply.failure : null,
+    failure: failed?.failure ?? null,
+    diagnostic: failed?.diagnostic ?? null,
     log: files(name).log,
   };
   return { status, listener };
@@ -525,7 +529,8 @@ const waitAnswering = Effect.fn("Server.waitAnswering")(function* (
         name,
         run: runId,
         failure: now.failure,
-        output: yield* runOutputOf(root, name, runId),
+        diagnostic: now.diagnostic,
+        log: now.log,
       });
     if (listener._tag === "Taken" && now.run === runId && now.port !== null) {
       const holders = yield* Effect.forEach(listener.pids, holderOf);
