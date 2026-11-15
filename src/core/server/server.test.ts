@@ -7,8 +7,8 @@ import * as Option from "effect/Option";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  applyOf,
   listenerOf,
-  runFailure,
   RunId,
   runOutput,
   ServerName,
@@ -34,6 +34,12 @@ server.listen(0, "127.0.0.1", () => {
   console.error("a stderr line");
   writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
 });
+const settle = { "late-fail": ["[t] INFO: Failed: 0 succeeded, 4 failed (3.2s)", "[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving."], "late-done": ["[t] INFO: Done: 6 succeeded (10.0s)"] }[process.argv[2]];
+const quiet = ["ALCHEMY_LOG_FORMAT", "ALCHEMY_LOG_LEVEL"].some((key) => process.env[key] !== undefined);
+if (settle) {
+  if (!quiet) console.log("[t] INFO: Dev · dev-test");
+  setTimeout(() => settle.filter((line) => !quiet || line.includes("ERROR")).forEach((line) => console.log(line)), 3000);
+}
 if (process.argv[2] === "apply-failed") {
   console.log("ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql");
   console.log("ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.");
@@ -57,9 +63,10 @@ interface Printed {
 
 let checkout: string;
 
-const serverIn = (cwd: string, ...args: string[]) => {
+const serverWith = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) => {
   const result = spawnSync("vpx", [ENTRY, "server", ...args], {
     cwd,
+    env: { ...process.env, ...env },
     encoding: "utf8",
   });
   return {
@@ -70,6 +77,9 @@ const serverIn = (cwd: string, ...args: string[]) => {
     stderr: result.stderr,
   };
 };
+
+const serverIn = (cwd: string, ...args: string[]) =>
+  serverWith(cwd, {}, ...args);
 
 const server = (...args: string[]) => serverIn(checkout, ...args);
 
@@ -187,6 +197,53 @@ describe("rigging server", () => {
     expect(server("status", "dev").json.run).toBe(now.json.run);
   }, 60_000);
 
+  it("fails a start whose apply fails after the port answers", () => {
+    const started = server(
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "late-fail",
+    );
+    expect(started.code).toBe(1);
+    expect(started.json.error._tag).toBe("ServerDegradedError");
+    expect(started.json.error.message).toContain("alchemy dev: apply failed");
+    expect(server("status", "dev").json.state).toBe("degraded");
+  }, 60_000);
+
+  it("keeps alchemy dev's apply lines on when the shell turns them off", () => {
+    const started = serverWith(
+      checkout,
+      {
+        ALCHEMY_LOG_FORMAT: "json",
+        ALCHEMY_LOG_LEVEL: "warn",
+      },
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "late-fail",
+    );
+    expect(started.code).toBe(1);
+    expect(started.json.error._tag).toBe("ServerDegradedError");
+  }, 60_000);
+
+  it("returns running once the apply is done, not when the port first answers", () => {
+    const started = server(
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "late-done",
+    );
+    expect(started.code).toBe(0);
+    expect(started.json.state).toBe("running");
+    expect(log()).toContain("Done: 6 succeeded");
+  }, 60_000);
+
   it("logs the exit of a server that SIGTERM ends without its own handler", () => {
     const started = server(
       "start",
@@ -289,50 +346,124 @@ describe("runOutput", () => {
   });
 });
 
-describe("runFailure", () => {
+describe("applyOf", () => {
   const name = ServerName.make("dev");
   const run = RunId.make("0123abcd");
+  const BANNER = "[04:17:39.887] INFO: Dev · dev-mw";
   const APPLY_FAILED =
-    "ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.";
+    "[04:17:48.756] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.";
   const runLog = (...lines: string[]) =>
     [
       "t0  ==== dev start 2026 run=ffffffff",
+      `t1  ${BANNER}`,
       `t1  ${APPLY_FAILED}`,
       "t2  ==== dev exit run=ffffffff code=0",
       "t3  ==== dev start 2026 run=0123abcd",
       ...lines.map((line) => `t4  ${line}`),
     ].join("\n");
 
-  it("names the failed apply the run logged", () => {
+  it("reads a command that logs no apply as none, routine failures included", () => {
     expect(
-      runFailure(runLog("[Backend] fail (local)", APPLY_FAILED), name, run),
-    ).toEqual(
-      Option.some(
-        "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.",
-      ),
-    );
-  });
-
-  it("ignores an earlier run's failure and routine output", () => {
-    expect(
-      runFailure(
+      applyOf(
         runLog("1 test failed", "ERROR: fetch failed; retrying"),
         name,
         run,
       ),
-    ).toEqual(Option.none());
+    ).toEqual({ _tag: "None" });
   });
 
-  it("clears once the stack reloads, and fires again when the reload fails", () => {
-    const reloaded = "Reloading stack: changed src/backend.ts";
-    expect(runFailure(runLog(APPLY_FAILED, reloaded), name, run)).toEqual(
-      Option.none(),
-    );
+  it("reads an apply as in progress from the banner until its summary", () => {
     expect(
-      Option.isSome(
-        runFailure(runLog(APPLY_FAILED, reloaded, APPLY_FAILED), name, run),
+      applyOf(
+        runLog(BANNER, "[Website] ready at http://localhost:1"),
+        name,
+        run,
       ),
-    ).toBe(true);
+    ).toEqual({ _tag: "Applying" });
+    expect(
+      applyOf(
+        runLog(BANNER, "[04:17:25.506] INFO: Done: 6 succeeded (10.0s)"),
+        name,
+        run,
+      ),
+    ).toEqual({ _tag: "Applied" });
+  });
+
+  it("names the failure, from the summary on, and ignores an earlier run's", () => {
+    expect(
+      applyOf(
+        runLog(
+          BANNER,
+          "[04:17:48.756] INFO: Failed: 0 succeeded, 4 failed (3.2s)",
+        ),
+        name,
+        run,
+      ),
+    ).toEqual({
+      _tag: "Failed",
+      failure: "Failed: 0 succeeded, 4 failed (3.2s)",
+    });
+    expect(
+      applyOf(
+        runLog(
+          BANNER,
+          "[04:17:48.756] INFO: Failed: 0 succeeded, 4 failed (3.2s)",
+          APPLY_FAILED,
+        ),
+        name,
+        run,
+      ),
+    ).toEqual({
+      _tag: "Failed",
+      failure:
+        "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.",
+    });
+  });
+
+  it("reads a failure before any apply as failed", () => {
+    expect(
+      applyOf(
+        runLog(
+          BANNER,
+          "[t] ERROR: alchemy dev: run failed; waiting for the next file change to retry.",
+        ),
+        name,
+        run,
+      ),
+    ).toMatchObject({ _tag: "Failed" });
+  });
+
+  it("reads an internally interrupted apply, which logs no summary, as failed", () => {
+    expect(
+      applyOf(
+        runLog(
+          BANNER,
+          "[t] ERROR: alchemy dev: apply was interrupted internally (a bug in a provider or the engine — please report it with the trace below); keeping dev alive so healthy resources keep serving.",
+        ),
+        name,
+        run,
+      ),
+    ).toMatchObject({ _tag: "Failed" });
+  });
+
+  it("reopens the apply on a reload, which settles the failure before it", () => {
+    const reloaded = "[t] INFO: Reloading stack: changed src/backend.ts";
+    expect(applyOf(runLog(BANNER, APPLY_FAILED, reloaded), name, run)).toEqual({
+      _tag: "Applying",
+    });
+    expect(
+      applyOf(
+        runLog(
+          BANNER,
+          APPLY_FAILED,
+          reloaded,
+          BANNER,
+          "[t] INFO: Done: 6 succeeded (1s)",
+        ),
+        name,
+        run,
+      ),
+    ).toEqual({ _tag: "Applied" });
   });
 });
 
@@ -353,7 +484,7 @@ describe("stateOf", () => {
         runner: false,
         group: true,
         answering: true,
-        failed: false,
+        apply: { _tag: "None" },
       }),
     ).toBe("orphaned");
   });
@@ -364,7 +495,7 @@ describe("stateOf", () => {
         runner: false,
         group: false,
         answering: false,
-        failed: false,
+        apply: { _tag: "None" },
       }),
     ).toBe("stopped");
   });
@@ -375,9 +506,20 @@ describe("stateOf", () => {
         runner: true,
         group: true,
         answering: true,
-        failed: true,
+        apply: { _tag: "Failed", failure: "x" },
       }),
     ).toBe("degraded");
+  });
+
+  it("reads a live runner that answers while its apply runs as starting", () => {
+    expect(
+      stateOf(record, {
+        runner: true,
+        group: true,
+        answering: true,
+        apply: { _tag: "Applying" },
+      }),
+    ).toBe("starting");
   });
 
   it("reads a live runner that does not answer yet as starting", () => {
@@ -386,7 +528,7 @@ describe("stateOf", () => {
         runner: true,
         group: true,
         answering: false,
-        failed: false,
+        apply: { _tag: "None" },
       }),
     ).toBe("starting");
   });
