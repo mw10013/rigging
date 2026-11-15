@@ -83,9 +83,14 @@ reads `starting` until a `Done:` or `Failed:` summary ends it. A failed apply
 reads `degraded`. Alchemy stays up after it, so the resources that did apply keep
 serving. `failure` holds the failure line (`alchemy dev: apply failed; …`), and
 is null in every other state. The next reload starts a new apply. A command that
-logs none of these lines is read by its port alone. So is `alchemy dev` under
-`--log-format json` or a `--log-level` above `info`, which print neither the
-banner nor the summaries. An orphaned server's
+logs none of these lines is read by its port alone.
+
+The apply lines come from Alchemy's plain console output, and Alchemy prints no
+other signal that an apply finished. rigging server removes `ALCHEMY_LOG_FORMAT`,
+`ALCHEMY_LOG_LEVEL` and `ALCHEMY_TUI` from the command's environment, since each
+one can turn those lines off. A command that passes `--log-format json` or a
+`--log-level` above `info` to `alchemy dev` turns them off too, and its server
+is read by its port alone. An orphaned server's
 runner died while its command lives on; `stop` ends it and `start` replaces it.
 The fields other than `rigging`, `name`, `state` and `log` are null when stopped.
 A typed failure prints `{ "rigging": 1, "error": { "_tag", "message" } }` and

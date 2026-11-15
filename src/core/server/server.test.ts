@@ -35,9 +35,10 @@ server.listen(0, "127.0.0.1", () => {
   writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
 });
 const settle = { "late-fail": ["[t] INFO: Failed: 0 succeeded, 4 failed (3.2s)", "[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving."], "late-done": ["[t] INFO: Done: 6 succeeded (10.0s)"] }[process.argv[2]];
+const quiet = ["ALCHEMY_LOG_FORMAT", "ALCHEMY_LOG_LEVEL", "ALCHEMY_TUI"].some((key) => process.env[key] !== undefined);
 if (settle) {
-  console.log("[t] INFO: Dev · dev-test");
-  setTimeout(() => settle.forEach((line) => console.log(line)), 3000);
+  if (!quiet) console.log("[t] INFO: Dev · dev-test");
+  setTimeout(() => settle.filter((line) => !quiet || line.includes("ERROR")).forEach((line) => console.log(line)), 3000);
 }
 if (process.argv[2] === "apply-failed") {
   console.log("ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql");
@@ -62,9 +63,10 @@ interface Printed {
 
 let checkout: string;
 
-const serverIn = (cwd: string, ...args: string[]) => {
+const serverWith = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) => {
   const result = spawnSync("vpx", [ENTRY, "server", ...args], {
     cwd,
+    env: { ...process.env, ...env },
     encoding: "utf8",
   });
   return {
@@ -75,6 +77,9 @@ const serverIn = (cwd: string, ...args: string[]) => {
     stderr: result.stderr,
   };
 };
+
+const serverIn = (cwd: string, ...args: string[]) =>
+  serverWith(cwd, {}, ...args);
 
 const server = (...args: string[]) => serverIn(checkout, ...args);
 
@@ -205,6 +210,25 @@ describe("rigging server", () => {
     expect(started.json.error._tag).toBe("ServerDegradedError");
     expect(started.json.error.message).toContain("alchemy dev: apply failed");
     expect(server("status", "dev").json.state).toBe("degraded");
+  }, 60_000);
+
+  it("keeps alchemy dev's apply lines on when the shell turns them off", () => {
+    const started = serverWith(
+      checkout,
+      {
+        ALCHEMY_LOG_FORMAT: "json",
+        ALCHEMY_LOG_LEVEL: "warn",
+        ALCHEMY_TUI: "1",
+      },
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "late-fail",
+    );
+    expect(started.code).toBe(1);
+    expect(started.json.error._tag).toBe("ServerDegradedError");
   }, 60_000);
 
   it("returns running once the apply is done, not when the port first answers", () => {
