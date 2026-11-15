@@ -41,8 +41,10 @@ if (settle) {
   setTimeout(() => settle.filter((line) => !quiet || line.includes("ERROR")).forEach((line) => console.log(line)), 3000);
 }
 if (process.argv[2] === "apply-failed") {
-  console.log("ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql");
-  console.log("ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.");
+  console.log("Ready! Your webhook signing secret is whsec_SENTINEL (^C to quit)");
+  console.log("[t] ERROR: [Backend] fail (local) — RewrittenMigrationHistoryError: changed 0001_init.sql (81ms)");
+  console.log("[t] INFO: Failed: 0 succeeded, 1 failed (6.3s)");
+  console.log("[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.\\nRewrittenMigrationHistoryError: changed 0001_init.sql\\n    at migrate (migrations.ts:1:1)\\n    at apply (Apply.ts:2:2)");
 }
 if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(() => process.exit(0)); });
 }
@@ -58,6 +60,7 @@ interface Printed {
   readonly group: number;
   readonly pid: number;
   readonly failure: string | null;
+  readonly diagnostic: string | null;
   readonly error: { readonly _tag: string; readonly message: string };
 }
 
@@ -71,6 +74,7 @@ const serverWith = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) => {
   });
   return {
     code: result.status,
+    stdout: result.stdout,
     json: (result.stdout.trim() === ""
       ? undefined
       : JSON.parse(result.stdout)) as Printed,
@@ -127,6 +131,7 @@ describe("rigging server", () => {
     expect(now.code).toBe(0);
     expect(now.json.state).toBe("running");
     expect(now.json.failure).toBeNull();
+    expect(now.json.diagnostic).toBeNull();
     expect(started.json.log).toBe(".rigging/servers/dev/log/current");
     expect(
       execFileSync("git", ["status", "--porcelain"], {
@@ -181,17 +186,31 @@ describe("rigging server", () => {
       "server.mjs",
       "apply-failed",
     );
-    expect(started.code).toBe(1);
-    expect(started.json.error._tag).toBe("ServerDegradedError");
-    expect(started.json.error.message).toContain("alchemy dev: apply failed");
-    expect(started.json.error.message).toContain(
-      "RewrittenMigrationHistoryError",
-    );
-
     const now = server("status", "dev");
+    const message = `the dev server logged a failure (run ${now.json.run}); it is still running
+RewrittenMigrationHistoryError: changed 0001_init.sql
+see .rigging/servers/dev/log/current`;
+    expect(started.code).toBe(1);
+    expect(started.json.error).toEqual({
+      _tag: "ServerDegradedError",
+      message,
+    });
+    expect(started.stderr).toBe(
+      `ok    started the dev server (run ${now.json.run})\nerror ${message}\n`,
+    );
+    for (const leak of ["whsec_SENTINEL", "    at ", "--- "]) {
+      expect(started.stdout).not.toContain(leak);
+      expect(started.stderr).not.toContain(leak);
+    }
+
     expect(now.code).toBe(3);
     expect(now.json.state).toBe("degraded");
-    expect(now.json.failure).toContain("alchemy dev: apply failed");
+    expect(now.json.failure).toBe(
+      "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.",
+    );
+    expect(now.json.diagnostic).toBe(
+      "RewrittenMigrationHistoryError: changed 0001_init.sql",
+    );
     expect(alive(now.json.group)).toBe(true);
     expect(server("start", "dev", "--", "node", "server.mjs").code).toBe(1);
     expect(server("status", "dev").json.run).toBe(now.json.run);
