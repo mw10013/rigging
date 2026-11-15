@@ -14,13 +14,14 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import {
+  type Apply,
+  applyOf,
   type Ending,
   EndpointJson,
   exitMarker,
   files,
   listenerOf,
   type PortListener,
-  runFailure,
   RunId,
   runOutput,
   type ServerName,
@@ -449,15 +450,16 @@ const sight = Effect.fn("Server.sight")(function* (
     Option.isSome(record) && Option.isSome(endpoint)
       ? yield* portListener(endpoint.value.port, record.value.group)
       : { _tag: "Free" };
-  const failure = Option.isNone(record)
-    ? Option.none<string>()
-    : Option.flatMap(yield* readFile(yield* at(root, files(name).log)), (log) =>
-        runFailure(log, name, record.value.run),
-      );
+  const apply: Apply = Option.isNone(record)
+    ? { _tag: "None" }
+    : Option.match(yield* readFile(yield* at(root, files(name).log)), {
+        onNone: () => ({ _tag: "None" }),
+        onSome: (log) => applyOf(log, name, record.value.run),
+      });
   const seen = Option.isNone(record)
-    ? { runner: false, group: false, answering: false, failed: false }
+    ? { runner: false, group: false, answering: false, apply }
     : {
-        failed: Option.isSome(failure),
+        apply,
         runner: yield* runnerAlive(record.value),
         group: yield* groupAlive(record.value.group),
         answering:
@@ -479,7 +481,8 @@ const sight = Effect.fn("Server.sight")(function* (
     startedAt: recorded?.startedAt ?? null,
     port: published?.port ?? null,
     url: published?.url ?? null,
-    failure: state === "degraded" ? Option.getOrNull(failure) : null,
+    failure:
+      state === "degraded" && apply._tag === "Failed" ? apply.failure : null,
     log: files(name).log,
   };
   return { status, listener };

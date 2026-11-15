@@ -104,27 +104,37 @@ export const runOutput = (
       : Option.some(body.slice(-RUN_OUTPUT_LINES).join("\n"));
   });
 
-/**
- * `alchemy dev` logs these when an apply fails and stays up so the resources that did apply keep
- * serving. It reapplies the stack after `Reloading stack:`, which settles any failure before it.
- */
-const FAILED =
-  /alchemy dev: (?:(?:apply|run) failed|\w+ was interrupted internally); .*/u;
-const RELOADED = "Reloading stack: ";
+export type Apply =
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Applying" }
+  | { readonly _tag: "Applied" }
+  | { readonly _tag: "Failed"; readonly failure: string };
 
-export const runFailure = (
-  log: string,
-  name: ServerName,
-  run: RunId,
-): Option.Option<string> =>
-  Option.flatMap(runLines(log, name, run), (lines) => {
-    for (const line of lines.toReversed()) {
-      if (line.includes(RELOADED)) return Option.none();
-      const failed = FAILED.exec(line);
-      if (failed !== null) return Option.some(failed[0]);
+/**
+ * How `alchemy dev` logs each apply. Its `Dev · <stage>` banner, or `Reloading stack:` after a
+ * file change, opens one, and a `Done:` or `Failed:` summary closes it. A failed apply, or a
+ * failure before any apply, also logs `alchemy dev: … failed; …`, and the process stays up so the
+ * resources that did apply keep serving. The Website answers during the apply, so the port says
+ * nothing about how the apply ended.
+ */
+const APPLY_EVENTS: readonly (readonly [RegExp, (text: string) => Apply])[] = [
+  [/\] INFO: (?:Dev · \S+$|Reloading stack: )/u, () => ({ _tag: "Applying" })],
+  [/\] INFO: Done: \d+ succeeded/u, () => ({ _tag: "Applied" })],
+  [
+    /Failed: \d+ succeeded.*|alchemy dev: (?:(?:apply|run) failed;|\w+ was interrupted internally) .*/u,
+    (failure) => ({ _tag: "Failed", failure }),
+  ],
+];
+
+export const applyOf = (log: string, name: ServerName, run: RunId): Apply => {
+  let apply: Apply = { _tag: "None" };
+  for (const line of Option.getOrElse(runLines(log, name, run), () => []))
+    for (const [pattern, event] of APPLY_EVENTS) {
+      const found = pattern.exec(line);
+      if (found !== null) apply = event(found[0]);
     }
-    return Option.none();
-  });
+  return apply;
+};
 
 /**
  * Who listens on the server's published port. A command may start its listener detached, in a
@@ -182,7 +192,7 @@ export interface Sighting {
   readonly runner: boolean;
   readonly group: boolean;
   readonly answering: boolean;
-  readonly failed: boolean;
+  readonly apply: Apply;
 }
 
 export const stateOf = (
@@ -191,6 +201,8 @@ export const stateOf = (
 ): ServerState => {
   if (Option.isNone(record)) return "stopped";
   if (!seen.runner) return seen.group ? "orphaned" : "stopped";
-  if (seen.failed) return "degraded";
-  return seen.answering ? "running" : "starting";
+  if (seen.apply._tag === "Failed") return "degraded";
+  return seen.answering && seen.apply._tag !== "Applying"
+    ? "running"
+    : "starting";
 };

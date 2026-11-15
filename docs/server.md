@@ -44,7 +44,9 @@ servers; one checkout has one agent, so that does not arise.
 rigging server gives the command `RIGGING_ENDPOINT`, a file path. Once the command knows
 where it listens, it writes `{"port": <n>, "url": "<optional public url>"}`
 there. rigging server counts the server as running once the command, or one of its
-descendants, listens on that port and the port answers any HTTP request. A
+descendants, listens on that port and the port answers any HTTP request. For
+`alchemy dev`, it also waits for the apply to settle, because Alchemy's Website
+answers while the rest of the stack is still applying. A
 descendant counts though it left the command's process group, as Alchemy's dev
 server does. Anything else listening there means the port was taken between
 the moment the command chose it and the moment it bound it. For a Shopify app, the web command can write it from the variables
@@ -73,11 +75,17 @@ printf '{"port":%s,"url":"%s"}' "$BACKEND_PORT" "$APP_URL" > "$RIGGING_ENDPOINT"
 ```
 
 `state` is `running`, `starting`, `degraded`, `stopped` or `orphaned`. A server whose
-port another process holds reads `starting`. A degraded server's command logged
-a failure after this run's start marker and stays up, as `alchemy dev` does
-when an apply fails (`alchemy dev: apply failed; …`) so the resources that did
-apply keep serving. `failure` holds that line, and is null in every other
-state. The failure clears once Alchemy logs `Reloading stack:` to apply again. An orphaned server's
+port another process holds reads `starting`.
+
+rigging server reads `alchemy dev`'s apply from this run's log. The `Dev · <stage>`
+banner, or `Reloading stack:` after a file change, starts an apply, and the server
+reads `starting` until a `Done:` or `Failed:` summary ends it. A failed apply
+reads `degraded`. Alchemy stays up after it, so the resources that did apply keep
+serving. `failure` holds the failure line (`alchemy dev: apply failed; …`), and
+is null in every other state. The next reload starts a new apply. A command that
+logs none of these lines is read by its port alone. So is `alchemy dev` under
+`--log-format json` or a `--log-level` above `info`, which print neither the
+banner nor the summaries. An orphaned server's
 runner died while its command lives on; `stop` ends it and `start` replaces it.
 The fields other than `rigging`, `name`, `state` and `log` are null when stopped.
 A typed failure prints `{ "rigging": 1, "error": { "_tag", "message" } }` and
