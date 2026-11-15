@@ -5,7 +5,7 @@ import * as Flag from "effect/cli/Flag";
  * The CLI. `start` and `status` print one JSON document on stdout
  * ({@link StatusJson}), versioned by `rigging: 1`; human lines go to stderr. A
  * typed failure prints `{ rigging: 1, error: { _tag, message } }` and exits 1.
- * `status` exits 3 when the server is not running.
+ * `status` exits 3 when the server is not running, a degraded server included.
  *
  * @module
  */

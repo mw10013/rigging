@@ -26,9 +26,11 @@ rigging server port                # pick a free port, publish it, print it
   prints the server's status JSON. A server that exits first fails the start
   with `ServerExitedError` and that run's log lines. A published port that
   another process holds fails the start with `PortTakenError`, which names the
-  holder's pid, command and working directory, and stops the server.
-- `status` prints the status JSON. It exits 0 when the server answers and 3
-  otherwise.
+  holder's pid, command and working directory, and stops the server. A server
+  whose command logs a failure fails the start with `ServerDegradedError`,
+  which names the failure and carries that run's log lines, and keeps running.
+- `status` prints the status JSON. It exits 0 when the server answers and has
+  logged no failure, and 3 otherwise.
 - `stop` sends SIGTERM to the command's process group, waits for the exit to
   be logged, and sends SIGKILL after 30 seconds.
 - `logs` prints the last lines of the log, or follows it across rotation.
@@ -65,14 +67,19 @@ printf '{"port":%s,"url":"%s"}' "$BACKEND_PORT" "$APP_URL" > "$RIGGING_ENDPOINT"
   "startedAt": "2026-11-03T14:56:35.734Z",
   "port": 50713,
   "url": "https://example.trycloudflare.com",
+  "failure": null,
   "log": ".rigging/servers/dev/log/current"
 }
 ```
 
-`state` is `running`, `starting`, `stopped` or `orphaned`. A server whose
-port another process holds reads `starting`. An orphaned server's
+`state` is `running`, `starting`, `degraded`, `stopped` or `orphaned`. A server whose
+port another process holds reads `starting`. A degraded server's command logged
+a failure after this run's start marker and stays up, as `alchemy dev` does
+when an apply fails (`alchemy dev: apply failed; …`) so the resources that did
+apply keep serving. `failure` holds that line, and is null in every other
+state. The failure clears once Alchemy logs `Reloading stack:` to apply again. An orphaned server's
 runner died while its command lives on; `stop` ends it and `start` replaces it.
-The fields other than `rigging server`, `name`, `state` and `log` are null when stopped.
+The fields other than `rigging`, `name`, `state` and `log` are null when stopped.
 A typed failure prints `{ "rigging": 1, "error": { "_tag", "message" } }` and
 exits 1. Version 1 only grows.
 

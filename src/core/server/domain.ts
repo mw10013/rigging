@@ -74,11 +74,11 @@ export const exitMarker = (name: ServerName, run: RunId, ending: Ending) =>
 const RUN_OUTPUT_LINES = 60;
 
 /** `s6-log` puts a timestamp before each line, so a marker is found inside the line, not at its start. */
-export const runOutput = (
+const runLines = (
   log: string,
   name: ServerName,
   run: RunId,
-): Option.Option<string> => {
+): Option.Option<readonly string[]> => {
   const lines = log.split("\n");
   const start = lines.findIndex(
     (line) =>
@@ -89,13 +89,42 @@ export const runOutput = (
   const end = after.findIndex((line) =>
     line.includes(`${MARKER} ${name} exit run=${run} `),
   );
-  const body = (end === -1 ? after : after.slice(0, end + 1)).filter(
-    (line) => line.trim() !== "",
-  );
-  return body.length === 0
-    ? Option.none()
-    : Option.some(body.slice(-RUN_OUTPUT_LINES).join("\n"));
+  return Option.some(end === -1 ? after : after.slice(0, end + 1));
 };
+
+export const runOutput = (
+  log: string,
+  name: ServerName,
+  run: RunId,
+): Option.Option<string> =>
+  Option.flatMap(runLines(log, name, run), (lines) => {
+    const body = lines.filter((line) => line.trim() !== "");
+    return body.length === 0
+      ? Option.none()
+      : Option.some(body.slice(-RUN_OUTPUT_LINES).join("\n"));
+  });
+
+/**
+ * `alchemy dev` logs these when an apply fails and stays up so the resources that did apply keep
+ * serving. It reapplies the stack after `Reloading stack:`, which settles any failure before it.
+ */
+const FAILED =
+  /alchemy dev: (?:(?:apply|run) failed|\w+ was interrupted internally); .*/u;
+const RELOADED = "Reloading stack: ";
+
+export const runFailure = (
+  log: string,
+  name: ServerName,
+  run: RunId,
+): Option.Option<string> =>
+  Option.flatMap(runLines(log, name, run), (lines) => {
+    for (const line of lines.toReversed()) {
+      if (line.includes(RELOADED)) return Option.none();
+      const failed = FAILED.exec(line);
+      if (failed !== null) return Option.some(failed[0]);
+    }
+    return Option.none();
+  });
 
 /**
  * Who listens on the server's published port. A command may start its listener detached, in a
@@ -143,6 +172,7 @@ export const listenerOf = (
 export const ServerState = Schema.Literals([
   "running",
   "starting",
+  "degraded",
   "stopped",
   "orphaned",
 ]);
@@ -152,6 +182,7 @@ export interface Sighting {
   readonly runner: boolean;
   readonly group: boolean;
   readonly answering: boolean;
+  readonly failed: boolean;
 }
 
 export const stateOf = (
@@ -160,5 +191,6 @@ export const stateOf = (
 ): ServerState => {
   if (Option.isNone(record)) return "stopped";
   if (!seen.runner) return seen.group ? "orphaned" : "stopped";
+  if (seen.failed) return "degraded";
   return seen.answering ? "running" : "starting";
 };

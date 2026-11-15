@@ -20,6 +20,7 @@ import {
   files,
   listenerOf,
   type PortListener,
+  runFailure,
   RunId,
   runOutput,
   type ServerName,
@@ -70,6 +71,20 @@ export class StartTimeoutError extends Schema.TaggedError<StartTimeoutError>()(
 ) {
   override get message() {
     return `the ${this.name} server did not answer within ${String(this.seconds)}s (run ${this.run}); it is still running\n${this.output}`;
+  }
+}
+
+export class ServerDegradedError extends Schema.TaggedError<ServerDegradedError>()(
+  "ServerDegradedError",
+  {
+    name: Schema.String,
+    run: Schema.String,
+    failure: Schema.String,
+    output: Schema.String,
+  },
+) {
+  override get message() {
+    return `the ${this.name} server logged a failure (run ${this.run}); it is still running\n${this.failure}\n${this.output}`;
   }
 }
 
@@ -420,6 +435,7 @@ export interface StatusJson {
   readonly startedAt: string | null;
   readonly port: number | null;
   readonly url: string | null;
+  readonly failure: string | null;
   readonly log: string;
 }
 
@@ -433,9 +449,15 @@ const sight = Effect.fn("Server.sight")(function* (
     Option.isSome(record) && Option.isSome(endpoint)
       ? yield* portListener(endpoint.value.port, record.value.group)
       : { _tag: "Free" };
+  const failure = Option.isNone(record)
+    ? Option.none<string>()
+    : Option.flatMap(yield* readFile(yield* at(root, files(name).log)), (log) =>
+        runFailure(log, name, record.value.run),
+      );
   const seen = Option.isNone(record)
-    ? { runner: false, group: false, answering: false }
+    ? { runner: false, group: false, answering: false, failed: false }
     : {
+        failed: Option.isSome(failure),
         runner: yield* runnerAlive(record.value),
         group: yield* groupAlive(record.value.group),
         answering:
@@ -457,6 +479,7 @@ const sight = Effect.fn("Server.sight")(function* (
     startedAt: recorded?.startedAt ?? null,
     port: published?.port ?? null,
     url: published?.url ?? null,
+    failure: state === "degraded" ? Option.getOrNull(failure) : null,
     log: files(name).log,
   };
   return { status, listener };
@@ -491,6 +514,13 @@ const waitAnswering = Effect.fn("Server.waitAnswering")(function* (
   while (true) {
     const { status: now, listener } = yield* sight(root, name);
     if (now.state === "running") return now;
+    if (now.failure !== null && now.run === runId)
+      return yield* new ServerDegradedError({
+        name,
+        run: runId,
+        failure: now.failure,
+        output: yield* runOutputOf(root, name, runId),
+      });
     if (listener._tag === "Taken" && now.run === runId && now.port !== null) {
       const holders = yield* Effect.forEach(listener.pids, holderOf);
       const record = yield* readRecord(root, name);
@@ -553,7 +583,11 @@ export const start = Effect.fn("Server.start")(function* (
   const record = yield* readRecord(root, name);
   if (Option.isSome(record)) {
     const now = yield* status(root, name);
-    if (now.state === "running" || now.state === "starting") {
+    if (
+      now.state === "running" ||
+      now.state === "starting" ||
+      now.state === "degraded"
+    ) {
       yield* Console.error(
         `ok    adopted the running ${name} server (pid ${String(record.value.pid)}, run ${record.value.run})`,
       );
