@@ -351,7 +351,6 @@ export const run = Effect.fn("Server.run")(function* (
         // Each hides the apply lines `applyOf` reads; a flag in the command still can.
         ALCHEMY_LOG_FORMAT: undefined,
         ALCHEMY_LOG_LEVEL: undefined,
-        ALCHEMY_TUI: undefined,
       },
       extendEnv: true,
       detached: true,

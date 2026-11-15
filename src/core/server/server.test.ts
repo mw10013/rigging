@@ -35,7 +35,7 @@ server.listen(0, "127.0.0.1", () => {
   writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port, url: "http://x.test/" + port }));
 });
 const settle = { "late-fail": ["[t] INFO: Failed: 0 succeeded, 4 failed (3.2s)", "[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving."], "late-done": ["[t] INFO: Done: 6 succeeded (10.0s)"] }[process.argv[2]];
-const quiet = ["ALCHEMY_LOG_FORMAT", "ALCHEMY_LOG_LEVEL", "ALCHEMY_TUI"].some((key) => process.env[key] !== undefined);
+const quiet = ["ALCHEMY_LOG_FORMAT", "ALCHEMY_LOG_LEVEL"].some((key) => process.env[key] !== undefined);
 if (settle) {
   if (!quiet) console.log("[t] INFO: Dev · dev-test");
   setTimeout(() => settle.filter((line) => !quiet || line.includes("ERROR")).forEach((line) => console.log(line)), 3000);
@@ -218,7 +218,6 @@ describe("rigging server", () => {
       {
         ALCHEMY_LOG_FORMAT: "json",
         ALCHEMY_LOG_LEVEL: "warn",
-        ALCHEMY_TUI: "1",
       },
       "start",
       "dev",
