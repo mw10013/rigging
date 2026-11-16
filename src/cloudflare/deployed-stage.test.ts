@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Cause from "effect/Cause";
@@ -9,7 +10,14 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { app } from "#rigging/core/app.ts";
 
@@ -21,8 +29,10 @@ import {
   ensureWebsite,
   readBuildConfig,
   replacesWebsite,
+  SHARED_BUILD_TOKEN,
   stageVariables,
   staleVariables,
+  up,
   variableProblems,
 } from "./deployed-stage.ts";
 
@@ -351,6 +361,12 @@ case "$*" in
   "builds workers get "*)
     if [ -f "$DEVKIT_FAKES/config.json" ]; then cat "$DEVKIT_FAKES/config.json"
     else cat "$DEVKIT_FAKES/config.err" >&2; exit 1; fi ;;
+  "builds workers update "*) cp "\${6#@}" "$DEVKIT_FAKES/update.json" ;;
+  "builds tokens list") cat "$DEVKIT_FAKES/tokens.json" ;;
+  "builds create "*)
+    echo "$*" > "$DEVKIT_FAKES/build.args"
+    echo '{"build_uuid":"b1","status":"queued","build_outcome":null}' ;;
+  "builds get b1") echo '{"build_uuid":"b1","status":"stopped","build_outcome":"success"}' ;;
   *) echo "unexpected cf $*" >&2; exit 1 ;;
 esac
 `,
@@ -362,6 +378,7 @@ case "$*" in
   "fetch origin "*) ;;
   "rev-parse HEAD") cat "$DEVKIT_FAKES/head" ;;
   "rev-parse origin/"*) cat "$DEVKIT_FAKES/origin" ;;
+  "remote get-url origin") echo "git@github.com:owner/baton.git" ;;
   *) echo "unexpected git $*" >&2; exit 1 ;;
 esac
 `,
@@ -509,5 +526,100 @@ describe("ensureWebsite", () => {
     expect(Exit.isSuccess(result) && result.value).toBe("tag-old");
     expect(read("git.log")).toBe("");
     expect(read("alchemy.args")).toBe("");
+  });
+});
+
+describe("up", () => {
+  const { fake, read } = useFakes();
+  const { name, root: workspace } = app();
+  const schemaModule = pathToFileURL(
+    path.join(workspace, "node_modules/effect/dist/Schema.js"),
+  ).href;
+  let root = "";
+  const stageEnv = (source: string) => {
+    fs.writeFileSync(path.join(root, "stacks/stage-env.ts"), source);
+  };
+  const run = () =>
+    Effect.runPromiseExit(
+      up("staging", { dryRun: false, confirmed: false }).pipe(
+        Effect.provide(NodeServices.layer),
+      ),
+    );
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "rigging-app-"));
+    fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name }));
+    fs.mkdirSync(path.join(root, "stacks"));
+    fs.writeFileSync(
+      path.join(root, ".env.staging"),
+      `API_KEY=key\nAPI_SECRET=${SECRET}\nCONTROL_TOKEN=\n`,
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(root);
+    fs.writeFileSync(fake("scripts.json"), website("staging", "tag-old"));
+    fs.writeFileSync(
+      fake("tokens.json"),
+      JSON.stringify([
+        { build_token_uuid: TOKEN, build_token_name: SHARED_BUILD_TOKEN },
+      ]),
+    );
+    fs.writeFileSync(
+      fake("config.json"),
+      JSON.stringify(
+        configFor(canonicalBuild("staging", TOKEN), {
+          production_settings: {
+            environment_variables: {
+              API_KEY: { is_secret: false },
+              OLD: { is_secret: true },
+            },
+          },
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("sets the file's variables on the build configuration, deletes the ones it lacks, and builds", async () => {
+    stageEnv(
+      `import * as Schema from ${JSON.stringify(schemaModule)};
+export default Schema.Struct({
+  API_KEY: Schema.NonEmptyString,
+  API_SECRET: Schema.Redacted(Schema.String),
+  CONTROL_TOKEN: Schema.optional(Schema.Redacted(Schema.String)),
+});
+`,
+    );
+    const result = await run();
+    expect(failureOf(result)).toBe("");
+    expect(JSON.parse(read("update.json"))).toStrictEqual({
+      production_settings: {
+        environment_variables: {
+          API_KEY: { value: "key", is_secret: false },
+          API_SECRET: { value: SECRET, is_secret: true },
+          OLD: null,
+        },
+      },
+    });
+    expect(read("build.args")).toBe("builds create tag-old --branch main\n");
+  });
+
+  it("refuses a stage-env module without a default export", async () => {
+    stageEnv("export const fields = {};\n");
+    expect(failureOf(await run())).toContain(
+      "must export a Schema.Struct of the stage's fields as its default",
+    );
+    expect(read("update.json")).toBe("");
+  });
+
+  it("refuses a stage-env module whose default is a schema but no Struct", async () => {
+    stageEnv(
+      `import * as Schema from ${JSON.stringify(schemaModule)};\nexport default Schema.String;\n`,
+    );
+    expect(failureOf(await run())).toContain(
+      "must export a Schema.Struct of the stage's fields as its default",
+    );
   });
 });
