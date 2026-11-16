@@ -2,7 +2,9 @@ import * as path from "node:path";
 
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Record from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 
 import { run } from "./process.ts";
 
@@ -24,30 +26,24 @@ const built = (target: string, extension: ".d.mts" | ".mjs") =>
 
 export const entriesOf = (source: unknown): readonly string[] => {
   const { exports, bin } = decodeSource(source);
-  return [...Object.values(exports), ...Object.values(bin)];
+  return [...Record.values(exports), ...Record.values(bin)];
 };
 
 /** A bin path has no leading `./`: npm 12 drops such a bin from the package it publishes. */
 export const builtManifest = (
-  source: Record<string, unknown>,
+  source: Record.ReadonlyRecord<string, unknown>,
   version?: string,
 ) => {
   const { exports, bin } = decodeSource(source);
-  const { "//": _note, imports: _imports, private: _private, ...rest } = source;
   return {
-    ...rest,
+    ...Struct.omit(source, ["//", "imports", "private"]),
     ...(version === undefined ? {} : { version }),
-    exports: Object.fromEntries(
-      Object.entries(exports).map(([key, target]) => [
-        key,
-        { types: built(target, ".d.mts"), default: built(target, ".mjs") },
-      ]),
-    ),
-    bin: Object.fromEntries(
-      Object.entries(bin).map(([key, target]) => [
-        key,
-        built(target, ".mjs").replace(/^\.\//u, ""),
-      ]),
+    exports: Record.map(exports, (target) => ({
+      types: built(target, ".d.mts"),
+      default: built(target, ".mjs"),
+    })),
+    bin: Record.map(bin, (target) =>
+      built(target, ".mjs").replace(/^\.\//u, ""),
     ),
   };
 };

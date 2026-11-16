@@ -23,10 +23,14 @@ import * as Alchemy from "alchemy";
 import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Function from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Record from "effect/Record";
 import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 
@@ -138,7 +142,7 @@ export const alchemyCommandOf = (
 
 type DeployedRun = "builds" | StageRun;
 
-const permits: Record<
+const permits: Record.ReadonlyRecord<
   DeployedRun,
   {
     readonly commands: readonly AlchemyCommand[];
@@ -259,16 +263,15 @@ export type StageFieldEnv =
  */
 export const checkStageEnv = (
   fields: StageFields,
-  env: Readonly<Record<string, string | undefined>>,
+  env: Record.ReadonlyRecord<string, string | undefined>,
 ): Effect.Effect<readonly StageFieldEnv[]> => {
   const provider = ConfigProvider.fromEnv({
-    env: Object.fromEntries(
-      Object.entries(env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
+    env: Record.filterMap(
+      env,
+      Result.liftPredicate(Predicate.isNotUndefined, Function.constVoid),
     ),
   });
-  return Effect.forEach(Object.entries(fields.fields), ([name, field]) =>
+  return Effect.forEach(Record.toEntries(fields.fields), ([name, field]) =>
     Effect.gen(function* () {
       const raw = yield* Effect.option(
         Config.schema(Schema.String, name).parse(provider),

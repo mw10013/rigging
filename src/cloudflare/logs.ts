@@ -8,6 +8,8 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Record from "effect/Record";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
@@ -76,11 +78,11 @@ const Message = Schema.Struct({
 const decodeMessage = Schema.decodeUnknownOption(Message);
 
 const textOf = ({ message, cause, annotations = {} }: typeof Message.Type) => {
-  const extra = Object.entries(annotations)
+  const extra = Record.toEntries(annotations)
     .filter(([key]) => !message.includes(`${key}=`))
     .map(
       ([key, value]) =>
-        `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`,
+        `${key}=${Predicate.isString(value) ? value : JSON.stringify(value)}`,
     );
   return [
     message,
@@ -108,7 +110,7 @@ export const lineOf = (stage: Deployed, event: Event) => {
   const message = Option.match(structured, {
     onSome: textOf,
     onNone: () =>
-      typeof event.source === "string"
+      Predicate.isString(event.source)
         ? event.source
         : JSON.stringify(event.source ?? ""),
   });

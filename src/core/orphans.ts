@@ -9,7 +9,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import * as Array from "effect/Array";
 import * as Duration from "effect/Duration";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 
 export interface Orphan {
   readonly pid: number;
@@ -29,27 +32,24 @@ const output = (program: string, args: readonly string[]) => {
   } catch (error) {
     // `lsof` exits 1 when some pid has gone, and still prints the rest.
     const stdout = (error as { stdout?: unknown }).stdout;
-    return typeof stdout === "string" ? stdout : "";
+    return Predicate.isString(stdout) ? stdout : "";
   }
 };
 
 export const parseProcesses = (text: string) =>
-  text.split("\n").flatMap((line) => {
-    const fields = /^\s*(?<pid>\d+)\s+(?<ppid>\d+)\s+(?<command>.+?)\s*$/u.exec(
-      line,
-    )?.groups;
-    return fields?.pid === undefined ||
-      fields.ppid === undefined ||
-      fields.command === undefined
-      ? []
-      : [
-          {
-            pid: Number(fields.pid),
-            ppid: Number(fields.ppid),
-            command: fields.command,
-          },
-        ];
-  });
+  Array.getSomes(
+    text.split("\n").map((line) => {
+      const fields =
+        /^\s*(?<pid>\d+)\s+(?<ppid>\d+)\s+(?<command>.+?)\s*$/u.exec(
+          line,
+        )?.groups;
+      return Option.all({
+        pid: Option.map(Option.fromUndefinedOr(fields?.pid), Number),
+        ppid: Option.map(Option.fromUndefinedOr(fields?.ppid), Number),
+        command: Option.fromUndefinedOr(fields?.command),
+      });
+    }),
+  );
 
 export const parseCwds = (text: string) => {
   const cwds = new Map<number, string>();

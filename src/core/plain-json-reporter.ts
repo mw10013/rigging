@@ -12,6 +12,8 @@ import path from "node:path";
 import process from "node:process";
 import { stripVTControlCharacters } from "node:util";
 
+import * as Predicate from "effect/Predicate";
+
 export default class PlainJsonReporter {
   readonly #outputFile: string;
 
@@ -37,7 +39,7 @@ export default class PlainJsonReporter {
     const report: unknown = JSON.parse(
       readFileSync(this.#outputFile, "utf8"),
       (_key, value: unknown) =>
-        typeof value === "string" ? stripVTControlCharacters(value) : value,
+        Predicate.isString(value) ? stripVTControlCharacters(value) : value,
     );
     writeFileSync(this.#outputFile, JSON.stringify(report, undefined, 2));
   }
