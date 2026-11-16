@@ -8,6 +8,7 @@
  */
 import { writeFileSync } from "node:fs";
 
+import * as Predicate from "effect/Predicate";
 import type { Plugin } from "vite";
 
 export const serverEndpoint = (): Plugin => ({
@@ -19,7 +20,7 @@ export const serverEndpoint = (): Plugin => ({
     const httpServer = server.httpServer;
     httpServer.once("listening", () => {
       const address = httpServer.address();
-      if (address === null || typeof address === "string") return;
+      if (address === null || Predicate.isString(address)) return;
       writeFileSync(
         file,
         JSON.stringify({

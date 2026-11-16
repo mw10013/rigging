@@ -93,6 +93,47 @@ const reachedFrom = (key: string) => {
   ]);
 };
 
+describe("builtManifest", () => {
+  const source = {
+    name: "@scope/kit",
+    "//": "a note for maintainers",
+    private: true,
+    type: "module",
+    imports: { "#kit/*": "./*" },
+    exports: { "./core/a": "./core/a.ts" },
+    bin: { kit: "./bin/kit.ts" },
+    peerDependencies: { effect: "^4.0.5" },
+  };
+
+  it("drops the source-only fields, maps each export and bin to dist/, and appends the version", () => {
+    expect(JSON.stringify(builtManifest(source, "1.2.3"))).toBe(
+      JSON.stringify({
+        name: "@scope/kit",
+        type: "module",
+        exports: {
+          "./core/a": {
+            types: "./dist/core/a.d.mts",
+            default: "./dist/core/a.mjs",
+          },
+        },
+        bin: { kit: "dist/bin/kit.mjs" },
+        peerDependencies: { effect: "^4.0.5" },
+        version: "1.2.3",
+      }),
+    );
+  });
+
+  it("adds no version when none is given", () => {
+    expect(Object.keys(builtManifest(source))).toStrictEqual([
+      "name",
+      "type",
+      "exports",
+      "bin",
+      "peerDependencies",
+    ]);
+  });
+});
+
 describe("the built package", () => {
   it("lists in its manifest exactly the exports and bins the source lists", () => {
     const sourceExports = source.exports as Record<string, string>;

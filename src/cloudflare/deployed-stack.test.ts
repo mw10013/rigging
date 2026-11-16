@@ -115,6 +115,24 @@ describe("checkStageEnv", () => {
         );
       }),
   );
+
+  it.effect("reads each variable of the environment once", () =>
+    Effect.gen(function* () {
+      const reads: string[] = [];
+      const env = {
+        get API_KEY() {
+          reads.push("API_KEY");
+          return reads.length === 1 ? "first" : "second";
+        },
+        API_SECRET: "s",
+      };
+      assert.deepStrictEqual(
+        shown(yield* checkStageEnv(Fields, env)).slice(0, 1),
+        [{ _tag: "Set", name: "API_KEY", value: "first", secret: false }],
+      );
+      assert.deepStrictEqual(reads, ["API_KEY"]);
+    }),
+  );
 });
 
 describe("alchemyCommandOf", () => {

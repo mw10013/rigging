@@ -2,6 +2,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseEnv, stripVTControlCharacters } from "node:util";
 
+import * as Array from "effect/Array";
 import * as Argument from "effect/cli/Argument";
 import * as CliError from "effect/cli/CliError";
 import * as Command from "effect/cli/Command";
@@ -10,10 +11,14 @@ import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Function from "effect/Function";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as Record from "effect/Record";
 import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -95,11 +100,7 @@ export const buildDrift = (
   config: BuildConfig,
   canonical: CanonicalBuild,
 ): readonly string[] => [
-  ...(
-    Object.keys(
-      canonical.production_settings,
-    ) as (keyof CanonicalBuild["production_settings"])[]
-  ).filter(
+  ...Record.keys(canonical.production_settings).filter(
     (key) =>
       JSON.stringify(config.production_settings[key]) !==
       JSON.stringify(canonical.production_settings[key]),
@@ -150,15 +151,15 @@ export type StageVariable = Extract<StageFieldEnv, { readonly _tag: "Set" }>;
 export const stageVariables = Effect.fn("DeployedStage.stageVariables")(
   function* (
     fields: StageFields,
-    file: Readonly<Record<string, string>>,
+    file: Record.ReadonlyRecord<string, string>,
     source: string,
   ) {
     const env = yield* checkStageEnv(fields, file);
     const invalid = env
       .filter((field) => field._tag === "Invalid")
       .map(({ name }) => name);
-    const undeclared = Object.keys(file).filter(
-      (name) => !Object.hasOwn(fields.fields, name),
+    const undeclared = Record.keys(file).filter(
+      (name) => !Record.has(fields.fields, name),
     );
     const problems = [
       ...(invalid.length > 0
@@ -182,7 +183,7 @@ export const staleVariables = (
   variables: readonly StageVariable[],
   existing: Variables,
 ): readonly string[] =>
-  Object.keys(existing).filter(
+  Record.keys(existing).filter(
     (name) => !variables.some((variable) => variable.name === name),
   );
 
@@ -230,11 +231,10 @@ const loadStageFields = Effect.fn("DeployedStage.loadStageFields")(
       try: () => import(pathToFileURL(file).href),
       catch: () => new StageError({ message: `cannot load ${file}` }),
     });
-    const fields =
-      typeof module === "object" && module !== null && "default" in module
-        ? module.default
-        : undefined;
-    if (!Schema.isSchema(fields) || !("fields" in fields))
+    const fields = Predicate.hasProperty(module, "default")
+      ? module.default
+      : undefined;
+    if (!Schema.isSchema(fields) || !Predicate.hasProperty(fields, "fields"))
       return yield* new StageError({
         message: `${STAGE_ENV_MODULE} must export a Schema.Struct of the stage's fields as its default`,
       });
@@ -255,10 +255,9 @@ const readStageFile = Effect.fn("DeployedStage.readStageFile")(function* (
           new StageError({ message: `cannot read ${name} at ${app().root}` }),
       ),
     );
-  const file = Object.fromEntries(
-    Object.entries(parseEnv(text)).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
+  const file = Record.filterMap(
+    parseEnv(text),
+    Result.liftPredicate(Predicate.isNotUndefined, Function.constVoid),
   );
   return yield* stageVariables(fields, file, name);
 });
@@ -281,7 +280,7 @@ const findTag = Effect.fn("DeployedStage.findTag")(function* (name: string) {
     ),
   );
   return Option.map(
-    Option.fromNullishOr(scripts.find((script) => script.script_name === name)),
+    Array.findFirst(scripts, (script) => script.script_name === name),
     (script) => script.id,
   );
 });
@@ -484,14 +483,12 @@ const syncVariables = Effect.fn("DeployedStage.syncVariables")(function* (
       JSON.stringify({
         production_settings: {
           environment_variables: {
-            ...Object.fromEntries(
-              variables.map(({ name, value, secret }) => [
-                name,
-                { value: Redacted.value(value), is_secret: secret },
-              ]),
-            ),
+            ...Record.fromIterableWith(variables, ({ name, value, secret }) => [
+              name,
+              { value: Redacted.value(value), is_secret: secret },
+            ]),
             // Builds deletes a variable set to `null`.
-            ...Object.fromEntries(stale.map((name) => [name, null])),
+            ...Record.fromIterableWith(stale, (name) => [name, null]),
           },
         },
       }),
@@ -638,9 +635,10 @@ export const up = Effect.fn("DeployedStage.up")(function* (
 });
 
 const alchemyEnv = (variables: readonly StageVariable[], run: StageRun) => ({
-  ...Object.fromEntries(
-    variables.map(({ name, value }) => [name, Redacted.value(value)]),
-  ),
+  ...Record.fromIterableWith(variables, ({ name, value }) => [
+    name,
+    Redacted.value(value),
+  ]),
   [STAGE_RUN]: run,
 });
 

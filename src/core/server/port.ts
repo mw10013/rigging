@@ -18,6 +18,7 @@ import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Predicate from "effect/Predicate";
 
 const freePort = Effect.callback<number>((resume) => {
   const server = createServer();
@@ -26,7 +27,7 @@ const freePort = Effect.callback<number>((resume) => {
   });
   server.listen(0, "localhost", () => {
     const address = server.address();
-    if (address === null || typeof address === "string") {
+    if (address === null || Predicate.isString(address)) {
       resume(
         Effect.die(
           new Error(`localhost bound no TCP address: ${String(address)}`),
