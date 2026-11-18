@@ -38,6 +38,12 @@ const RECORD_TIMEOUT = Duration.seconds(30);
 const STOP_TIMEOUT = Duration.seconds(30);
 const POLL = Duration.millis(500);
 const ANSWER_TIMEOUT = Duration.seconds(10);
+/**
+ * How long the run's processes outside the command's group get after SIGTERM before SIGKILL. A whole
+ * graceful `alchemy dev` stop, sidecar and workerd included, takes about a second; 2 seconds keeps the
+ * runner's cleanup inside the 5 seconds `stopRecorded` allows after SIGKILL.
+ */
+const MARKED_STOP_TIMEOUT = Duration.seconds(2);
 
 /** `s6-log`'s rotation: 20 files of 5 MiB, 100 MiB in all, a timestamp on each line. */
 const s6LogArgs = (directory: string) => [
@@ -183,9 +189,17 @@ const processTable = output("ps", ["-A", "-o", "pid=,ppid="]).pipe(
   }),
 );
 
-/** The pids among `pids` whose environment holds `BOSUN_RUN=<run>`, which `run` gives the command. */
-const markedPids = (pids: readonly number[], run: RunId) =>
-  output("ps", ["-E", "-o", "pid=,command=", "-p", pids.join(",")]).pipe(
+/**
+ * The pids whose environment holds `BOSUN_RUN=<run>`, which `run` gives the command: among `pids`,
+ * or among every process when `pids` is absent.
+ */
+const markedPids = (run: RunId, pids?: readonly number[]) =>
+  output("ps", [
+    "-E",
+    "-o",
+    "pid=,command=",
+    ...(pids === undefined ? ["-A"] : ["-p", pids.join(",")]),
+  ]).pipe(
     Effect.map((text) => {
       const marker = `BOSUN_RUN=${run}`;
       const marked = new Set<number>();
@@ -197,6 +211,27 @@ const markedPids = (pids: readonly number[], run: RunId) =>
     }),
   );
 
+/**
+ * Ends every other process that carries the run's marker. Alchemy's sidecar and its workerd leave the
+ * command's group and outlive a SIGKILL of it, holding the local databases locked.
+ */
+const endMarked = Effect.fn("Server.endMarked")(function* (run: RunId) {
+  const others = markedPids(run).pipe(
+    Effect.map((pids) => [...pids].filter((pid) => pid !== process.pid)),
+  );
+  const signalAll = (name: NodeJS.Signals) =>
+    others.pipe(
+      Effect.flatMap((pids) =>
+        Effect.forEach(pids, (pid) => signal(pid, name), { discard: true }),
+      ),
+    );
+  const none = others.pipe(Effect.map((pids) => pids.length === 0));
+  if (yield* none) return;
+  yield* signalAll("SIGTERM");
+  if (!(yield* waitUntil(none, MARKED_STOP_TIMEOUT)))
+    yield* signalAll("SIGKILL");
+});
+
 const portListener = Effect.fn("Server.portListener")(function* (
   port: number,
   record: ServerRecord,
@@ -207,7 +242,7 @@ const portListener = Effect.fn("Server.portListener")(function* (
     listening,
     yield* processTable,
     record.group,
-    yield* markedPids(listening, record.run),
+    yield* markedPids(record.run, listening),
   );
 });
 
@@ -413,7 +448,8 @@ export const run = Effect.fn("Server.run")(function* (
       yield* signal(-group, "SIGKILL");
   });
   const finish = (ending: Ending) =>
-    logger.exitCode.pipe(
+    endMarked(runId).pipe(
+      Effect.andThen(logger.exitCode),
       Effect.ignore,
       Effect.andThen(logLine(root, name, exitMarker(name, runId, ending))),
       Effect.andThen(removeFiles(root, name)),
@@ -597,6 +633,8 @@ const stopRecorded = Effect.fn("Server.stopRecorded")(function* (
     if (!(yield* waitUntil(gone, Duration.seconds(5))))
       return yield* new StopTimeoutError({ name, group: record.group });
   }
+  // A dead runner ended none of them; a live one already did, and this finds none.
+  yield* endMarked(record.run);
   yield* removeFiles(root, name);
 });
 
@@ -629,6 +667,8 @@ export const start = Effect.fn("Server.start")(function* (
       );
       yield* stopRecorded(root, name, record.value);
     }
+    // A runner that died with its group ended none of the run's other processes.
+    yield* endMarked(record.value.run);
     yield* removeFiles(root, name);
   }
 

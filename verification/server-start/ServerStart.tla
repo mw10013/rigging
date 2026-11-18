@@ -209,11 +209,14 @@ RunnerWritesRecord ==
   /\ runner' = "recorded" /\ record' = "new"
   /\ UNCHANGED <<cmdVars, startVars>> /\ Ghost
 
-\* The command ended; s6-log drains the pipe and exits; exit marker; removeFiles.
+\* The command ended: endMarked ends the run's processes outside its group
+\* (the sidecar carries BOSUN_RUN); s6-log drains the pipe and exits; exit
+\* marker; removeFiles.
 RunnerRemovesFiles ==
   /\ runner = "recorded" /\ cmd = "dead" /\ pipe = <<>>
   /\ runner' = "removed" /\ record' = "none" /\ endpoint' = FALSE
-  /\ UNCHANGED <<truth, reloads, sidecar, foreign, pipe, logged, cmd,
+  /\ sidecar' = IF sidecar = "listening" THEN "gone" ELSE sidecar
+  /\ UNCHANGED <<truth, reloads, foreign, pipe, logged, cmd,
                  startVars>> /\ Ghost
 
 RunnerExits ==
@@ -354,6 +357,10 @@ ExitedMeansDied == result = "exited" => everDied
 \* PortTakenError ("held by another process"): a process outside the
 \* server held the port when start asked who listens.
 PortTakenMeansStranger == result = "portTaken" => snap.foreignAtLsof
+
+\* Once the runner has removed the run's files, none of the run's processes
+\* still holds the port (#30).
+RunnerEndsTheRun == runner = "removed" => sidecar # "listening"
 
 TypeOK ==
   /\ cmd \in {"unborn", "alive", "dead"}

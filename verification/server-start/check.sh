@@ -44,7 +44,7 @@ else
   status=1
 fi
 
-echo "== rules: RunningMeansApplied, DegradedMeansFailed, ExitedMeansDied, PortTakenMeansStranger"
+echo "== rules: RunningMeansApplied, DegradedMeansFailed, ExitedMeansDied, PortTakenMeansStranger, RunnerEndsTheRun"
 result=$(tlc main ServerStart.tla)
 if passed "$result"; then
   grep "distinct states found" <<<"$result"

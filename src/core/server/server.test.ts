@@ -21,7 +21,8 @@ const FIXTURE = `
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
-if (process.argv[2] === "crash") { console.log("crashing on purpose"); process.exit(7); }
+if (process.argv[2]?.startsWith("detach")) writeFileSync("detached.pid", String(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }).pid));
+if (process.argv[2] === "crash" || process.argv[2] === "detach-crash") { console.log("crashing on purpose"); process.exit(7); }
 if (process.argv[2] === "publish") {
   writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port: Number(process.argv[3]) }));
   setInterval(() => {}, 1000);
@@ -120,6 +121,14 @@ const alive = (pid: number) => {
   } catch {
     return false;
   }
+};
+
+const detached = () =>
+  Number(fs.readFileSync(path.join(checkout, "detached.pid"), "utf8"));
+
+const endDetached = () => {
+  if (fs.existsSync(path.join(checkout, "detached.pid")) && alive(detached()))
+    process.kill(detached(), "SIGKILL");
 };
 
 beforeEach(() => {
@@ -368,6 +377,65 @@ see .rigging/servers/dev/log/current`;
         fs.readFileSync(path.join(checkout, "sidecar.pid"), "utf8"),
       );
       if (alive(sidecar)) process.kill(sidecar, "SIGKILL");
+    }
+  }, 60_000);
+
+  it("ends the run's processes that left the command's group when it stops", () => {
+    try {
+      const started = server(
+        "start",
+        "dev",
+        "--",
+        "node",
+        "server.mjs",
+        "detach",
+      );
+      expect(started.code).toBe(0);
+      expect(alive(detached())).toBe(true);
+      expect(server("stop", "dev").code).toBe(0);
+      expect(alive(detached())).toBe(false);
+    } finally {
+      endDetached();
+    }
+  }, 60_000);
+
+  it("ends the run's processes that left the command's group when it crashes", () => {
+    try {
+      const crashed = server(
+        "start",
+        "dev",
+        "--",
+        "node",
+        "server.mjs",
+        "detach-crash",
+      );
+      expect(crashed.json.error._tag).toBe("ServerExitedError");
+      expect(alive(detached())).toBe(false);
+    } finally {
+      endDetached();
+    }
+  }, 60_000);
+
+  it("ends a dead run's processes that left the command's group before starting a new one", () => {
+    try {
+      const started = server(
+        "start",
+        "dev",
+        "--",
+        "node",
+        "server.mjs",
+        "detach",
+      );
+      process.kill(started.json.pid, "SIGKILL");
+      process.kill(-started.json.group, "SIGKILL");
+      expect(alive(detached())).toBe(true);
+      expect(server("status", "dev").json.state).toBe("stopped");
+      expect(
+        server("start", "dev", "--", "node", "server.mjs").json.state,
+      ).toBe("running");
+      expect(alive(detached())).toBe(false);
+    } finally {
+      endDetached();
     }
   }, 60_000);
 
