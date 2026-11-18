@@ -416,6 +416,29 @@ see .rigging/servers/dev/log/current`;
     }
   }, 60_000);
 
+  it("ends a dead run's processes that left the command's group before starting a new one", () => {
+    try {
+      const started = server(
+        "start",
+        "dev",
+        "--",
+        "node",
+        "server.mjs",
+        "detach",
+      );
+      process.kill(started.json.pid, "SIGKILL");
+      process.kill(-started.json.group, "SIGKILL");
+      expect(alive(detached())).toBe(true);
+      expect(server("status", "dev").json.state).toBe("stopped");
+      expect(
+        server("start", "dev", "--", "node", "server.mjs").json.state,
+      ).toBe("running");
+      expect(alive(detached())).toBe(false);
+    } finally {
+      endDetached();
+    }
+  }, 60_000);
+
   it("stops an orphaned server before starting a new one", () => {
     const started = server("start", "dev", "--", "node", "server.mjs");
     process.kill(started.json.pid, "SIGKILL");
