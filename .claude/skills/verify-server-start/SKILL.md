@@ -53,10 +53,10 @@ Coverage, and how each piece is kept in step with the code:
 | `port.ts` `publishFreePort`                                                                                                                          | `CommandPublishesPort`, `StrangerTakesPort`                                                                                                                            | reading                                                  |
 | alchemy dev's apply lines and sidecar (`node_modules/alchemy/src/Local/RpcSpawner.ts`, `Cli/commands/dev.ts`)                                        | `AlchemyBegins`, `AlchemyFailsEarly`, `SidecarBinds`, `AlchemyApplies`, `AlchemyFails`, `AlchemyReloads`, `CommandExits`, `CommandCrashes`, `SidecarNoticesParentGone` | reading, on an alchemy upgrade                           |
 
-**Sync commit: `96aff0ed504ad49959581d631202adb2bfec9524`.** At that commit the model was confirmed to describe the code above. To see what changed since then:
+**Sync commit: `47e0e1f6f74dde9136877dc9cb7b8549a59a9f93`.** At that commit the model was confirmed to describe the code above. To see what changed since then:
 
 ```sh
-git diff 96aff0ed504ad49959581d631202adb2bfec9524 -- src/core/server/server.ts src/core/server/domain.ts src/core/server/port.ts
+git diff 47e0e1f6f74dde9136877dc9cb7b8549a59a9f93 -- src/core/server/server.ts src/core/server/domain.ts src/core/server/port.ts
 ```
 
 `check.sh` runs that diff as its last step, and it exits 2 when the diff is not empty. Conformance catches changes to the three pure functions. For every other row marked "reading", open the changed code and the model action beside it. Check that the action still does what the code does, in the same order, with the same split into steps. A change to `sight` that conformance missed was caught this way: answering without `listener._tag === "Server"` needs `snap.lis = "server"` dropped from `SightFetches`, and then `RunningMeansApplied` breaks, because a stranger binds the port between `lsof` and the fetch. In particular:
