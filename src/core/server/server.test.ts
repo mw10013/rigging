@@ -50,6 +50,26 @@ if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log(
 }
 `;
 
+/**
+ * Plays alchemy dev's supervisor: publishes a free port, starts an apply, spawns a sidecar in its
+ * own process group that listens on the port, then dies by SIGKILL, so launchd adopts the sidecar.
+ */
+const SUPERVISOR = `
+import net from "node:net";
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const probe = net.createServer().listen(0, "127.0.0.1", () => {
+  const port = probe.address().port;
+  probe.close(() => {
+    writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port }));
+    console.log("[t] INFO: Dev · dev-test");
+    const sidecar = spawn("node", ["-e", \`require("http").createServer((_, res) => res.end("hi")).listen(\${port}, "127.0.0.1", () => console.log("bound")); setTimeout(() => process.exit(0), 20000);\`], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    writeFileSync("sidecar.pid", String(sidecar.pid));
+    sidecar.stdout.once("data", () => process.kill(process.pid, "SIGKILL"));
+  });
+});
+`;
+
 interface Printed {
   readonly state: string;
   readonly name: string;
@@ -109,6 +129,7 @@ beforeEach(() => {
   execFileSync("git", ["init", "-q"], { cwd: checkout });
   fs.writeFileSync(path.join(checkout, "package.json"), `{"name":"app"}`);
   fs.writeFileSync(path.join(checkout, "server.mjs"), FIXTURE);
+  fs.writeFileSync(path.join(checkout, "supervisor.mjs"), SUPERVISOR);
 });
 
 afterEach(() => {
@@ -138,7 +159,7 @@ describe("rigging server", () => {
         cwd: checkout,
         encoding: "utf8",
       }),
-    ).toBe("?? package.json\n?? server.mjs\n");
+    ).toBe("?? package.json\n?? server.mjs\n?? supervisor.mjs\n");
 
     expect(server("stop", "dev").code).toBe(0);
     expect(alive(started.json.group)).toBe(false);
@@ -326,6 +347,27 @@ see .rigging/servers/dev/log/current`;
     } finally {
       holder.kill();
       fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("reads a crashed supervisor's orphaned sidecar as the server's, and reports the exit", () => {
+    try {
+      const crashed = server(
+        "start",
+        "dev",
+        "--",
+        "bash",
+        "-c",
+        "node supervisor.mjs; sleep 4",
+      );
+      expect(crashed.code).toBe(1);
+      expect(crashed.json.error._tag).toBe("ServerExitedError");
+      expect(crashed.json.error.message).toContain("INFO: Dev · dev-test");
+    } finally {
+      const sidecar = Number(
+        fs.readFileSync(path.join(checkout, "sidecar.pid"), "utf8"),
+      );
+      if (alive(sidecar)) process.kill(sidecar, "SIGKILL");
     }
   }, 60_000);
 
@@ -721,20 +763,36 @@ describe("listenerOf", () => {
     [101, 100],
     [102, 101],
     [200, 1],
+    [201, 1],
   ]);
+  const unmarked = new Set<number>();
 
   it("counts a listener that descends from the command as the server, though it left its group", () => {
-    expect(listenerOf([102], parents, command)).toEqual({ _tag: "Server" });
+    expect(listenerOf([102], parents, command, unmarked)).toEqual({
+      _tag: "Server",
+    });
   });
 
   it("reads any listener outside the command's tree as taken", () => {
-    expect(listenerOf([101, 200], parents, command)).toEqual({
+    expect(listenerOf([101, 200], parents, command, unmarked)).toEqual({
       _tag: "Taken",
       pids: [200],
     });
   });
 
+  it("counts a listener adopted by launchd as the server when it carries the run's marker", () => {
+    expect(listenerOf([200, 201], parents, command, new Set([200]))).toEqual({
+      _tag: "Taken",
+      pids: [201],
+    });
+    expect(listenerOf([200], parents, command, new Set([200]))).toEqual({
+      _tag: "Server",
+    });
+  });
+
   it("reads a port whose listeners have all exited as free", () => {
-    expect(listenerOf([300], parents, command)).toEqual({ _tag: "Free" });
+    expect(listenerOf([300], parents, command, unmarked)).toEqual({
+      _tag: "Free",
+    });
   });
 });

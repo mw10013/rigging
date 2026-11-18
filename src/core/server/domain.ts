@@ -180,7 +180,8 @@ export const applyOf = (log: string, name: ServerName, run: RunId): Apply => {
 /**
  * Who listens on the server's published port. A command may start its listener detached, in a
  * process group of its own (Alchemy does), so the server is the command and its descendants,
- * not its group.
+ * not its group. When the command dies first, launchd adopts the listener, which still carries
+ * the run's marker in its environment, so it is the server too.
  */
 export type PortListener =
   | { readonly _tag: "Free" }
@@ -204,17 +205,21 @@ const descends = (
 };
 
 /**
- * Reads the port's listening pids against the process table (`parents`, pid to parent pid). A
- * pid missing from the table exited after it was listed, so it holds nothing.
+ * Reads the port's listening pids against the process table (`parents`, pid to parent pid) and
+ * the listening pids whose environment carries the run's marker (`marked`). A pid missing from
+ * the table exited after it was listed, so it holds nothing.
  */
 export const listenerOf = (
   listening: readonly number[],
   parents: ReadonlyMap<number, number>,
   command: number,
+  marked: ReadonlySet<number>,
 ): PortListener => {
   const live = listening.filter((pid) => parents.has(pid));
   if (live.length === 0) return { _tag: "Free" };
-  const foreign = live.filter((pid) => !descends(pid, command, parents));
+  const foreign = live.filter(
+    (pid) => !marked.has(pid) && !descends(pid, command, parents),
+  );
   return foreign.length === 0
     ? { _tag: "Server" }
     : { _tag: "Taken", pids: foreign };

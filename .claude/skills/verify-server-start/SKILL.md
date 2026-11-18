@@ -13,12 +13,12 @@ description: Model-check what `rigging server start` tells its caller (running, 
 
 The model is `verification/server-start/ServerStart.tla`. Each rule is an invariant there:
 
-| Invariant                | start said            | it must be true that                                                                               |
-| ------------------------ | --------------------- | -------------------------------------------------------------------------------------------------- |
-| `RunningMeansApplied`    | `state: "running"`    | the server answered on its port while alchemy's latest apply had ended in `Done:`                  |
-| `DegradedMeansFailed`    | `ServerDegradedError` | this run's alchemy really logged a failure (not an earlier run's)                                  |
-| `ExitedMeansDied`        | `ServerExitedError`   | the command or its runner really died                                                              |
-| `PortTakenMeansStranger` | `PortTakenError`      | a process outside the server held the port when start ran `lsof` (**known finding, breaks today**) |
+| Invariant                | start said            | it must be true that                                                              |
+| ------------------------ | --------------------- | --------------------------------------------------------------------------------- |
+| `RunningMeansApplied`    | `state: "running"`    | the server answered on its port while alchemy's latest apply had ended in `Done:` |
+| `DegradedMeansFailed`    | `ServerDegradedError` | this run's alchemy really logged a failure (not an earlier run's)                 |
+| `ExitedMeansDied`        | `ServerExitedError`   | the command or its runner really died                                             |
+| `PortTakenMeansStranger` | `PortTakenError`      | a process outside the server held the port when start ran `lsof`                  |
 
 ## Run it
 
@@ -26,13 +26,11 @@ The model is `verification/server-start/ServerStart.tla`. Each rule is an invari
 vp run verify:server-start
 ```
 
-It takes about 3 seconds. `verification/server-start/check.sh` runs TLC through `verification/tlc.sh`, with the Java and TLC that the root `mise.toml` pins. The first run installs them and needs the network. TLC's full output for each run goes to `$OUT`, a temp folder by default. The script does four things:
+It takes about 3 seconds. `verification/server-start/check.sh` runs TLC through `verification/tlc.sh`, with the Java and TLC that the root `mise.toml` pins. The first run installs them and needs the network. TLC's full output for each run goes to `$OUT`, a temp folder by default. The script does three things:
 
 1. **Conformance.** `conformance.ts` runs the real `stateOf`, `listenerOf` and `applyOf` from `src/core/server/domain.ts` on every input the model can give them. That covers 64 sightings, 8 listener cases, and 121 sequences of alchemy log lines after a stale failed run. TLC then checks the model's `StateOf`, `ListenerOf` and `ApplyAfter` against those answers. A mismatch prints the rows that differ.
-2. **Rules.** `main.cfg` checks `RunningMeansApplied`, `DegradedMeansFailed`, `ExitedMeansDied` and `TypeOK`. That is about 56,000 distinct states.
-3. **Known finding.** `finding.cfg` checks `PortTakenMeansStranger` and expects it to break.
-
-4. **Staleness.** It diffs `server.ts`, `domain.ts` and `port.ts` against the sync commit below.
+2. **Rules.** `main.cfg` checks `RunningMeansApplied`, `DegradedMeansFailed`, `ExitedMeansDied`, `PortTakenMeansStranger` and `TypeOK`. That is about 53,000 distinct states.
+3. **Staleness.** It diffs `server.ts`, `domain.ts` and `port.ts` against the sync commit below.
 
 Exit 0 means every step came out as recorded here and the covered code has not changed since the sync commit. Exit 1 means a check failed, and the output says which one. Exit 2 means every check passed, but the covered code has changed since the sync commit. Conformance cannot see most of that code, so a 2 is not a pass. Do the review in "Does my change touch it?".
 
@@ -42,17 +40,17 @@ To try a model change without touching the repo copy, copy the `.tla` and `.cfg`
 
 Coverage, and how each piece is kept in step with the code:
 
-| Code                                                                                                                          | Model                                                                                                                                                                  | Kept in step by                |
-| ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `domain.ts` `stateOf`                                                                                                         | `StateOf`                                                                                                                                                              | conformance (automatic)        |
-| `domain.ts` `listenerOf`, `descends`                                                                                          | `ListenerOf`                                                                                                                                                           | conformance (automatic)        |
-| `domain.ts` `applyOf`, `runLines`, `APPLY_EVENTS`                                                                             | `ApplyAfter`, `LogWritesLine`                                                                                                                                          | conformance (automatic)        |
-| `server.ts` `start`: the stale-record branch, the runner spawn, `waitUntil(recorded, RECORD_TIMEOUT)`                         | `StartClearsStale`, `StartLaunchesRunner`, `StartSeesRecord`, `StartRecordTimesOut`                                                                                    | reading                        |
-| `server.ts` `sight`: the order of its reads (record, endpoint, `portListener`, log, `runnerAlive`, `groupAlive`, `answering`) | `SightReadsRecord` … `SightFetches`, one action per read, in that order                                                                                                | reading                        |
-| `server.ts` `waitAnswering`: the order of its checks (running, failure, `Taken`, not starting, deadline)                      | `Verdict`, `StartDecides`, `StartPollsAgain`, `StartTimesOut`                                                                                                          | reading                        |
-| `server.ts` `run`: spawn, record write, `finish` (logger drains, exit marker, `removeFiles`)                                  | `RunnerSpawnsCommand`, `RunnerWritesRecord`, `RunnerRemovesFiles`, `RunnerExits`, `RunnerCrashes`                                                                      | reading                        |
-| `port.ts` `publishFreePort`                                                                                                   | `CommandPublishesPort`, `StrangerTakesPort`                                                                                                                            | reading                        |
-| alchemy dev's apply lines and sidecar (`node_modules/alchemy/src/Local/RpcSpawner.ts`, `Cli/commands/dev.ts`)                 | `AlchemyBegins`, `AlchemyFailsEarly`, `SidecarBinds`, `AlchemyApplies`, `AlchemyFails`, `AlchemyReloads`, `CommandExits`, `CommandCrashes`, `SidecarNoticesParentGone` | reading, on an alchemy upgrade |
+| Code                                                                                                                           | Model                                                                                                                                                                  | Kept in step by                                          |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `domain.ts` `stateOf`                                                                                                          | `StateOf`                                                                                                                                                              | conformance (automatic)                                  |
+| `domain.ts` `listenerOf`, `descends`; `server.ts` `portListener`, `markedPids` (`BOSUN_RUN=<run>` in a listener's environment) | `ListenerOf`, `SightAsksWhoListens` (lsof, ps and ps -E as one step)                                                                                                   | conformance for `listenerOf`; reading for `portListener` |
+| `domain.ts` `applyOf`, `runLines`, `APPLY_EVENTS`                                                                              | `ApplyAfter`, `LogWritesLine`                                                                                                                                          | conformance (automatic)                                  |
+| `server.ts` `start`: the stale-record branch, the runner spawn, `waitUntil(recorded, RECORD_TIMEOUT)`                          | `StartClearsStale`, `StartLaunchesRunner`, `StartSeesRecord`, `StartRecordTimesOut`                                                                                    | reading                                                  |
+| `server.ts` `sight`: the order of its reads (record, endpoint, `portListener`, log, `runnerAlive`, `groupAlive`, `answering`)  | `SightReadsRecord` … `SightFetches`, one action per read, in that order                                                                                                | reading                                                  |
+| `server.ts` `waitAnswering`: the order of its checks (running, failure, `Taken`, not starting, deadline)                       | `Verdict`, `StartDecides`, `StartPollsAgain`, `StartTimesOut`                                                                                                          | reading                                                  |
+| `server.ts` `run`: spawn, record write, `finish` (logger drains, exit marker, `removeFiles`)                                   | `RunnerSpawnsCommand`, `RunnerWritesRecord`, `RunnerRemovesFiles`, `RunnerExits`, `RunnerCrashes`                                                                      | reading                                                  |
+| `port.ts` `publishFreePort`                                                                                                    | `CommandPublishesPort`, `StrangerTakesPort`                                                                                                                            | reading                                                  |
+| alchemy dev's apply lines and sidecar (`node_modules/alchemy/src/Local/RpcSpawner.ts`, `Cli/commands/dev.ts`)                  | `AlchemyBegins`, `AlchemyFailsEarly`, `SidecarBinds`, `AlchemyApplies`, `AlchemyFails`, `AlchemyReloads`, `CommandExits`, `CommandCrashes`, `SidecarNoticesParentGone` | reading, on an alchemy upgrade                           |
 
 **Sync commit: `d6d259ddf01c5f15a5f9e370d3f234d4eaf4dee1`.** At that commit the model was confirmed to describe the code above. To see what changed since then:
 
@@ -69,9 +67,9 @@ Move the sync commit forward, here and only here, only after you have confirmed 
 
 ## Read a result
 
-Read every TLC result with the pstack `/statechart` skill. Run it on a scratch copy of `ServerStart.tla` with `main.cfg` or `finding.cfg`. For a broken rule it gives the shortest path that breaks it. When every rule holds, it draws how a start moves between states. `check.sh` prints only the action names of a path. The full trace is in `$OUT/main.out` or `$OUT/finding.out`.
+Read every TLC result with the pstack `/statechart` skill. Run it on a scratch copy of `ServerStart.tla` with `main.cfg`. For a broken rule it gives the shortest path that breaks it. When every rule holds, it draws how a start moves between states. `check.sh` prints only the action names of a path. The full trace is in `$OUT/main.out`.
 
-To tell a real bug from a modeling error, replay the path against the real code, one step per action. The replay of the known finding, below, shows the pattern: a scratch checkout (`git init`, a `package.json` of `{"name":"app"}`), a small Node script that plays alchemy's part, and `vpx <repo>/src/bin/rigging.ts server start dev -- <command>`. If the real code does not do what the path says, the model is wrong. Fix the model, not the rule. If the real code does misreport, it is a finding. Report it with the path in the code's words. Do not weaken the rule or the model to make it pass, and do not change product code unless the user asks.
+To tell a real bug from a modeling error, replay the path against the real code, one step per action. The replay of the fixed finding, below, shows the pattern: a scratch checkout (`git init`, a `package.json` of `{"name":"app"}`), a small Node script that plays alchemy's part, and `vpx <repo>/src/bin/rigging.ts server start dev -- <command>`. If the real code does not do what the path says, the model is wrong. Fix the model, not the rule. If the real code does misreport, it is a finding. Report it with the path in the code's words. Do not weaken the rule or the model to make it pass, and do not change product code unless the user asks.
 
 ## When a change is meant to change behavior
 
@@ -90,20 +88,12 @@ These broken variants were each confirmed to fail at the sync commit. Use them t
 | …and the model's `SightReadsLog` reads the stale run's failure when this run has logged nothing   | `DegradedMeansFailed`          |
 | `waitAnswering` exits on `now.state !== "running"` instead of `!== "starting"` (model: `Verdict`) | `ExitedMeansDied`              |
 | `BindWaitsForBanner = FALSE` in `main.cfg` (assumption A1 dropped)                                | `RunningMeansApplied`          |
+| `listenerOf` drops `!marked.has(pid) &&`                                                          | conformance (`ListenerOf` row) |
+| …and the model's `ListenerOf` follows it (`ELSE IF foreignListens \/ ~cmdAlive THEN "taken"`)     | `PortTakenMeansStranger`       |
 
-## Known finding: a crashed alchemy's own sidecar reads as a stranger
+## Fixed finding: a crashed alchemy's own sidecar read as a stranger (#29)
 
-`PortTakenMeansStranger` breaks at the sync commit:
-
-1. start launches the runner, which spawns the command and writes `record.json`.
-2. `rigging server port` publishes the port. alchemy prints `Dev · <stage>`, and its sidecar binds the port for the Website.
-3. alchemy's supervisor dies abruptly while the apply is still running. Its sidecar runs in its own process group and lives on until it notices the RPC link to its parent has closed.
-4. `sight` runs `lsof`. The sidecar's parent is gone, so launchd has adopted it, and `listenerOf` finds a listener that does not descend from `record.group`. It returns `Taken`.
-5. The runner is still alive (it has not yet removed the record), so the state is `starting` and the run matches. `waitAnswering` checks `Taken` before it checks whether the server exited. It fails with `PortTakenError: port N … is held by another process, so the server was stopped`, and it names the server's own sidecar.
-
-Expected: `ServerExitedError` with the run's log lines. The report sends the caller after a port conflict that does not exist, and it hides the crash.
-
-This was replayed against the real code. A `bash -c 'node supervisor.mjs; sleep 4'` command, where `supervisor.mjs` publishes a free port, spawns a detached sidecar that listens on it, and then SIGKILLs itself, gets `PortTakenError` naming that sidecar's pid. When the code is fixed, `check.sh` exits 1 and says that `PortTakenMeansStranger` now holds. Then move it into `main.cfg`, delete `finding.cfg` and its step from `check.sh`, and remove this section.
+`PortTakenMeansStranger` broke before #29. When alchemy's supervisor died during an apply, launchd adopted its sidecar, `listenerOf` found a listener that did not descend from `record.group` and returned `Taken`, and start stopped the server with `PortTakenError` naming the server's own sidecar. Now `portListener` reads the listening pids' environments, and `listenerOf` counts a listener carrying `BOSUN_RUN=<run>` as the server's. start ends in `ServerExitedError` once the run ends. The test "reads a crashed supervisor's orphaned sidecar as the server's" in `src/core/server/server.test.ts` replays the crash through the real CLI.
 
 ## Scope
 

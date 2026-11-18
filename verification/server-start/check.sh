@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Checks the `rigging server start` model: conformance to domain.ts, the rules
-# that must hold, and the known finding. Run as `vp run verify:server-start`.
+# Checks the `rigging server start` model: conformance to domain.ts and the
+# rules that must hold. Run as `vp run verify:server-start`.
 # MODEL_DIR=<folder> checks a copy of the .tla and .cfg files there instead,
 # against this checkout's code (for trying a model change in scratch).
 # TLC's full output for each run goes to ${OUT:-a temp folder}.
-# Exit 0: conformance holds, every rule in main.cfg holds, the known finding
-# is still what it was, and the covered code matches the sync commit.
+# Exit 0: conformance holds, every rule in main.cfg holds, and the covered
+# code matches the sync commit.
 # Exit 1: a check failed; the output says which.
 # Exit 2: every check passed, but covered code changed since the sync commit
 # in .claude/skills/verify-server-start/SKILL.md, so the model may no longer
@@ -44,7 +44,7 @@ else
   status=1
 fi
 
-echo "== rules: RunningMeansApplied, DegradedMeansFailed, ExitedMeansDied"
+echo "== rules: RunningMeansApplied, DegradedMeansFailed, ExitedMeansDied, PortTakenMeansStranger"
 result=$(tlc main ServerStart.tla)
 if passed "$result"; then
   grep "distinct states found" <<<"$result"
@@ -52,19 +52,6 @@ if passed "$result"; then
 else
   grep -E "^Error|violated|^State [0-9]+:" <<<"$result" | sed 's/ line [0-9].*//'
   echo "FAIL: a rule broke. Read the path with /statechart before you decide it is a bug. Output: $out/main.out"
-  status=1
-fi
-
-echo "== known finding: PortTakenMeansStranger (expected to break)"
-result=$(tlc finding ServerStart.tla)
-if grep -q "Invariant PortTakenMeansStranger is violated" <<<"$result"; then
-  echo "still breaks, as recorded in .claude/skills/verify-server-start/SKILL.md"
-elif passed "$result"; then
-  echo "FAIL: PortTakenMeansStranger now holds. If the code was fixed, move it into main.cfg and drop finding.cfg."
-  status=1
-else
-  tail -20 <<<"$result"
-  echo "FAIL: output: $out/finding.out"
   status=1
 fi
 

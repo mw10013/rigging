@@ -56,11 +56,13 @@ StateOf(rec, runnerUp, groupUp, ans, apply) ==
   ELSE IF ans /\ apply # "applying" THEN "running"
   ELSE "starting"
 
-\* listenerOf(lsof pids, ps table, record.group). The sidecar descends from
-\* the command only while the command lives; then launchd adopts it.
+\* listenerOf(lsof pids, ps table, record.group, marked pids). The sidecar
+\* descends from the command only while the command lives; then launchd
+\* adopts it. It carries the run's marker (BOSUN_RUN) either way, so it is
+\* the server's whether or not the command lives.
 ListenerOf(sidecarListens, foreignListens, cmdAlive) ==
   IF ~sidecarListens /\ ~foreignListens THEN "free"
-  ELSE IF foreignListens \/ ~cmdAlive THEN "taken"
+  ELSE IF foreignListens THEN "taken"
   ELSE "server"
 
 \* applyOf: the apply after one more line of this run; the last line wins

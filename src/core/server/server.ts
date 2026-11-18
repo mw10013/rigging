@@ -183,13 +183,32 @@ const processTable = output("ps", ["-A", "-o", "pid=,ppid="]).pipe(
   }),
 );
 
+/** The pids among `pids` whose environment holds `BOSUN_RUN=<run>`, which `run` gives the command. */
+const markedPids = (pids: readonly number[], run: RunId) =>
+  output("ps", ["-E", "-o", "pid=,command=", "-p", pids.join(",")]).pipe(
+    Effect.map((text) => {
+      const marker = `BOSUN_RUN=${run}`;
+      const marked = new Set<number>();
+      for (const line of text.split("\n")) {
+        const [pid, ...words] = line.trim().split(/\s+/u);
+        if (words.includes(marker)) marked.add(Number(pid));
+      }
+      return marked;
+    }),
+  );
+
 const portListener = Effect.fn("Server.portListener")(function* (
   port: number,
-  command: number,
+  record: ServerRecord,
 ) {
   const listening = yield* listeningPids(port);
   if (listening.length === 0) return { _tag: "Free" } satisfies PortListener;
-  return listenerOf(listening, yield* processTable, command);
+  return listenerOf(
+    listening,
+    yield* processTable,
+    record.group,
+    yield* markedPids(listening, record.run),
+  );
 });
 
 const holderOf = Effect.fn("Server.holderOf")(function* (pid: number) {
@@ -453,7 +472,7 @@ const sight = Effect.fn("Server.sight")(function* (
   const endpoint = yield* readEndpoint(root, name);
   const listener: PortListener =
     Option.isSome(record) && Option.isSome(endpoint)
-      ? yield* portListener(endpoint.value.port, record.value.group)
+      ? yield* portListener(endpoint.value.port, record.value)
       : { _tag: "Free" };
   const apply: Apply = Option.isNone(record)
     ? { _tag: "None" }
