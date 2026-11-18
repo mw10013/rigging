@@ -667,6 +667,8 @@ export const start = Effect.fn("Server.start")(function* (
       );
       yield* stopRecorded(root, name, record.value);
     }
+    // A runner that died with its group ended none of the run's other processes.
+    yield* endMarked(record.value.run);
     yield* removeFiles(root, name);
   }
 

@@ -133,4 +133,4 @@ straggler would hold the logger's pipe open. It then ends every process whose
 environment carries `BOSUN_RUN=<run>`, which the command's descendants inherit:
 SIGTERM, then SIGKILL after 2 seconds. Alchemy's sidecar and workerd leave the
 command's group, and outlive a SIGKILL of it with the local databases locked.
-`stop` does the same once the group is gone, for a runner that died.
+`stop` does the same once the group is gone, and `start` before it replaces a stopped or orphaned server, for a runner that died.
