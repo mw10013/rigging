@@ -64,7 +64,6 @@ export const lint = {
   },
   env: { builtin: true },
   rules: {
-    // The formatter orders import statements; this orders the names inside one.
     "sort-imports": [
       "error",
       { ignoreDeclarationSort: true, ignoreCase: true },

@@ -681,10 +681,7 @@ export const replacesWebsite = (plan: string) =>
     stripVTControlCharacters(plan),
   );
 
-/**
- * `alchemy plan`'s output, captured, run with the file's values in its environment as Builds would
- * run the deploy. Without `--detailed` it names resources only, never values.
- */
+/** Without `--detailed`, `alchemy plan` names resources only, never values. */
 const plan = Effect.fn("DeployedStage.plan")(function* (
   stage: Deployed,
   variables: readonly StageVariable[],

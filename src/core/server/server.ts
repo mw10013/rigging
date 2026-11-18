@@ -182,10 +182,6 @@ const processTable = output("ps", ["-A", "-o", "pid=,ppid="]).pipe(
   }),
 );
 
-/**
- * The pids whose environment holds `BOSUN_RUN=<run>`, which `run` gives the command: among `pids`,
- * or among every process when `pids` is absent.
- */
 const markedPids = (run: RunId, pids?: readonly number[]) =>
   output("ps", [
     "-E",
@@ -626,7 +622,6 @@ const stopRecorded = Effect.fn("Server.stopRecorded")(function* (
     if (!(yield* waitUntil(gone, Duration.seconds(5))))
       return yield* new StopTimeoutError({ name, group: record.group });
   }
-  // A dead runner ended none of them; a live one already did, and this finds none.
   yield* endMarked(record.run);
   yield* removeFiles(root, name);
 });
@@ -660,7 +655,6 @@ export const start = Effect.fn("Server.start")(function* (
       );
       yield* stopRecorded(root, name, record.value);
     }
-    // A runner that died with its group ended none of the run's other processes.
     yield* endMarked(record.value.run);
     yield* removeFiles(root, name);
   }
