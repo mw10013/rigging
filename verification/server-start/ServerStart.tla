@@ -56,10 +56,6 @@ StateOf(rec, runnerUp, groupUp, ans, apply) ==
   ELSE IF ans /\ apply # "applying" THEN "running"
   ELSE "starting"
 
-\* listenerOf(lsof pids, ps table, record.group, marked pids). The sidecar
-\* descends from the command only while the command lives; then launchd
-\* adopts it. It carries the run's marker (BOSUN_RUN) either way, so it is
-\* the server's whether or not the command lives.
 ListenerOf(sidecarListens, foreignListens, cmdAlive) ==
   IF ~sidecarListens /\ ~foreignListens THEN "free"
   ELSE IF foreignListens THEN "taken"
@@ -209,9 +205,6 @@ RunnerWritesRecord ==
   /\ runner' = "recorded" /\ record' = "new"
   /\ UNCHANGED <<cmdVars, startVars>> /\ Ghost
 
-\* The command ended: endMarked ends the run's processes outside its group
-\* (the sidecar carries BOSUN_RUN); s6-log drains the pipe and exits; exit
-\* marker; removeFiles.
 RunnerRemovesFiles ==
   /\ runner = "recorded" /\ cmd = "dead" /\ pipe = <<>>
   /\ runner' = "removed" /\ record' = "none" /\ endpoint' = FALSE
