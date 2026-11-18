@@ -81,7 +81,10 @@ const stateRows = flags.flatMap((rec) =>
   ),
 );
 
-/** The command is pid 20 under the runner (10); the sidecar is 30; a stranger is 40. */
+/**
+ * The command is pid 20 under the runner (10); the sidecar is 30 and carries the run's marker; a
+ * stranger is 40 and does not.
+ */
 const listenerRows = flags.flatMap((sidecar) =>
   flags.flatMap((stranger) =>
     flags.map((commandAlive) => {
@@ -93,7 +96,8 @@ const listenerRows = flags.flatMap((sidecar) =>
       ]);
       if (commandAlive) parents.set(20, 10);
       const listening = [...(sidecar ? [30] : []), ...(stranger ? [40] : [])];
-      const tag = listenerOf(listening, parents, 20)._tag;
+      const marked = new Set(listening.filter((pid) => pid === 30));
+      const tag = listenerOf(listening, parents, 20, marked)._tag;
       return [
         sidecar,
         stranger,
