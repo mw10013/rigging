@@ -77,6 +77,27 @@ describe("orphansIn", () => {
   });
 });
 
+describe("stopOrphans", () => {
+  it("passes over a pid that has already exited", () => {
+    const gone = Number(
+      execFileSync("sh", ["-c", "echo $$"], { encoding: "utf8" }).trim(),
+    );
+
+    expect(() => {
+      stopOrphans([{ pid: gone, command: "sleep", cwd: "/" }]);
+    }).not.toThrow();
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "throws when it may not signal the pid",
+    () => {
+      expect(() => {
+        stopOrphans([{ pid: 1, command: "launchd", cwd: "/" }]);
+      }).toThrow(expect.objectContaining({ code: "EPERM" }));
+    },
+  );
+});
+
 describe("parsers", () => {
   it("reads ps lines whose executable path has spaces", () => {
     expect(
