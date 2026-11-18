@@ -34,7 +34,7 @@ rigging server port                # pick a free port, publish it, print it
   logged no failure, and 3 otherwise.
 - `stop` sends SIGTERM to the command's process group, waits for the exit to
   be logged, and sends SIGKILL after 30 seconds. It then ends every process
-  left that carries the run's `BOSUN_RUN`, so none outlives the run.
+  left that carries the run's `RIGGING_RUN`, so none outlives the run.
 - `logs` prints the last lines of the log, or follows it across rotation.
 - `run` is internal: the foreground runner that `start` launches.
 
@@ -130,7 +130,7 @@ drain its last output and write `==== <name> exit run=<id> code=<n>`, or
 `signal=<name>` for a command the signal ended (one that does not catch it). When the
 command exits, the runner also ends anything left in its group, since a
 straggler would hold the logger's pipe open. It then ends every process whose
-environment carries `BOSUN_RUN=<run>`, which the command's descendants inherit:
+environment carries `RIGGING_RUN=<run>`, which the command's descendants inherit:
 SIGTERM, then SIGKILL after 2 seconds. Alchemy's sidecar and workerd leave the
 command's group, and outlive a SIGKILL of it with the local databases locked.
 `stop` does the same once the group is gone, and `start` before it replaces a stopped or orphaned server, for a runner that died.

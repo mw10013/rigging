@@ -190,7 +190,7 @@ const markedPids = (run: RunId, pids?: readonly number[]) =>
     ...(pids === undefined ? ["-A"] : ["-p", pids.join(",")]),
   ]).pipe(
     Effect.map((text) => {
-      const marker = `BOSUN_RUN=${run}`;
+      const marker = `RIGGING_RUN=${run}`;
       const marked = new Set<number>();
       for (const line of text.split("\n")) {
         const [pid, ...words] = line.trim().split(/\s+/u);
@@ -389,7 +389,7 @@ export const run = Effect.fn("Server.run")(function* (
       cwd: root,
       env: {
         RIGGING_ENDPOINT: yield* at(root, files(name).endpoint),
-        BOSUN_RUN: runId,
+        RIGGING_RUN: runId,
         FORCE_COLOR: undefined,
         NO_COLOR: "1",
         // Each hides the apply lines `applyOf` reads; a flag in the command still can.
