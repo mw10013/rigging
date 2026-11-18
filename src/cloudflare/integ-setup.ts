@@ -45,8 +45,8 @@ export default function setup(project: TestProject) {
   for (const directory of ["local", "bundles"]) {
     const parent = path.join(dotAlchemy, directory);
     if (!fs.existsSync(parent)) continue;
-    for (const name of fs.readdirSync(parent))
-      if (name.startsWith(`${stack}-`))
-        fs.rmSync(path.join(parent, name), { recursive: true, force: true });
+    for (const entry of fs.readdirSync(parent))
+      if (entry.startsWith(`${stack}-`))
+        fs.rmSync(path.join(parent, entry), { recursive: true, force: true });
   }
 }

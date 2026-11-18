@@ -13,9 +13,10 @@ import * as Record from "effect/Record";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
-import { Deployed, workerNameOf } from "#rigging/cloudflare/stage.ts";
 import { app } from "#rigging/core/app.ts";
 import { runCommand } from "#rigging/core/command.ts";
+
+import { Deployed, workerNameOf } from "./stage.ts";
 
 class LogsError extends Schema.TaggedError<LogsError>()("LogsError", {
   message: Schema.String,

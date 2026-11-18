@@ -204,11 +204,6 @@ const descends = (
   return false;
 };
 
-/**
- * Reads the port's listening pids against the process table (`parents`, pid to parent pid) and
- * the listening pids whose environment carries the run's marker (`marked`). A pid missing from
- * the table exited after it was listed, so it holds nothing.
- */
 export const listenerOf = (
   listening: readonly number[],
   parents: ReadonlyMap<number, number>,

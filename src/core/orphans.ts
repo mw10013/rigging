@@ -31,8 +31,10 @@ const output = (program: string, args: readonly string[]) => {
     });
   } catch (error) {
     // `lsof` exits 1 when some pid has gone, and still prints the rest.
-    const stdout = (error as { stdout?: unknown }).stdout;
-    return Predicate.isString(stdout) ? stdout : "";
+    return Predicate.hasProperty(error, "stdout") &&
+      Predicate.isString(error.stdout)
+      ? error.stdout
+      : "";
   }
 };
 

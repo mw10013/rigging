@@ -1,8 +1,7 @@
 /**
  * The app rigging acts on: the nearest directory at or above `directory` that holds a
  * `package.json`, never above the repository's top level (the first directory holding a `.git`
- * entry, a directory in a checkout and a file in a worktree). This is the rule rigging server and wt apply,
- * so every tool agrees on which app a command runs for. rigging never locates the app from where
+ * entry, a directory in a checkout and a file in a worktree). rigging never locates the app from where
  * rigging itself sits: installed as a package it lives under `node_modules`, and a linked copy sits wherever its repository is.
  *
  * @module

@@ -144,18 +144,6 @@ const signal = (pid: number, name: NodeJS.Signals | 0) =>
 
 const groupAlive = (group: number) => signal(-group, 0);
 
-const commandLine = Effect.fn("Server.commandLine")(function* (pid: number) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const text = yield* spawner
-    .string(
-      ChildProcess.make("ps", ["-o", "command=", "-p", String(pid)], {
-        stdin: "ignore",
-      }),
-    )
-    .pipe(Effect.orElseSucceed(() => ""));
-  return text.trim();
-});
-
 const output = Effect.fn("Server.output")(function* (
   program: string,
   args: readonly string[],
@@ -164,6 +152,11 @@ const output = Effect.fn("Server.output")(function* (
   return yield* spawner
     .string(ChildProcess.make(program, args, { stdin: "ignore" }))
     .pipe(Effect.orElseSucceed(() => ""));
+});
+
+const commandLine = Effect.fn("Server.commandLine")(function* (pid: number) {
+  const text = yield* output("ps", ["-o", "command=", "-p", String(pid)]);
+  return text.trim();
 });
 
 const numbers = (text: string) =>
@@ -189,10 +182,6 @@ const processTable = output("ps", ["-A", "-o", "pid=,ppid="]).pipe(
   }),
 );
 
-/**
- * The pids whose environment holds `BOSUN_RUN=<run>`, which `run` gives the command: among `pids`,
- * or among every process when `pids` is absent.
- */
 const markedPids = (run: RunId, pids?: readonly number[]) =>
   output("ps", [
     "-E",
@@ -633,7 +622,6 @@ const stopRecorded = Effect.fn("Server.stopRecorded")(function* (
     if (!(yield* waitUntil(gone, Duration.seconds(5))))
       return yield* new StopTimeoutError({ name, group: record.group });
   }
-  // A dead runner ended none of them; a live one already did, and this finds none.
   yield* endMarked(record.run);
   yield* removeFiles(root, name);
 });
@@ -667,7 +655,6 @@ export const start = Effect.fn("Server.start")(function* (
       );
       yield* stopRecorded(root, name, record.value);
     }
-    // A runner that died with its group ended none of the run's other processes.
     yield* endMarked(record.value.run);
     yield* removeFiles(root, name);
   }

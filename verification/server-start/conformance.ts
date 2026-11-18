@@ -1,11 +1,3 @@
-/**
- * Prints `CodeTables.tla`: what the real `stateOf`, `listenerOf` and `applyOf` answer on every
- * input the model can give them. `Conformance.tla` checks the model's `StateOf`, `ListenerOf` and
- * `ApplyAfter` against these rows, so a change to one of the three functions fails `check.sh`
- * until the model follows it.
- *
- * @module
- */
 import process from "node:process";
 
 import * as Option from "effect/Option";
@@ -81,23 +73,27 @@ const stateRows = flags.flatMap((rec) =>
   ),
 );
 
-/**
- * The command is pid 20 under the runner (10); the sidecar is 30 and carries the run's marker; a
- * stranger is 40 and does not.
- */
+const RUNNER = 10;
+const COMMAND = 20;
+const SIDECAR = 30;
+const STRANGER = 40;
+
 const listenerRows = flags.flatMap((sidecar) =>
   flags.flatMap((stranger) =>
     flags.map((commandAlive) => {
       const parents = new Map([
         [1, 0],
-        [10, 1],
-        [30, commandAlive ? 20 : 1],
-        [40, 1],
+        [RUNNER, 1],
+        [SIDECAR, commandAlive ? COMMAND : 1],
+        [STRANGER, 1],
       ]);
-      if (commandAlive) parents.set(20, 10);
-      const listening = [...(sidecar ? [30] : []), ...(stranger ? [40] : [])];
-      const marked = new Set(listening.filter((pid) => pid === 30));
-      const tag = listenerOf(listening, parents, 20, marked)._tag;
+      if (commandAlive) parents.set(COMMAND, RUNNER);
+      const listening = [
+        ...(sidecar ? [SIDECAR] : []),
+        ...(stranger ? [STRANGER] : []),
+      ];
+      const marked = new Set(listening.filter((pid) => pid === SIDECAR));
+      const tag = listenerOf(listening, parents, COMMAND, marked)._tag;
       return [
         sidecar,
         stranger,
@@ -111,7 +107,6 @@ const listenerRows = flags.flatMap((sidecar) =>
 const stamp = (index: number) =>
   `2026-11-18 01:00:${String(index).padStart(2, "0")}.000000000  `;
 
-/** The lines alchemy dev prints for each model event, as `s6-log` writes them. */
 const linesOf = (event: string, first: boolean) =>
   event === "applying"
     ? [
@@ -133,7 +128,6 @@ const linesOf = (event: string, first: boolean) =>
             "RewrittenMigrationHistoryError: changed 0001_init.sql",
           ];
 
-/** A stale run that failed, then the new run's start marker and its lines. */
 const logOf = (events: readonly string[]) => {
   const lines = [
     "==== dev start 2026-11-17T00:00:00.000Z run=aaaaaaaa",

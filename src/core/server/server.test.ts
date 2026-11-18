@@ -51,11 +51,7 @@ if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log(
 }
 `;
 
-/**
- * Plays alchemy dev's supervisor: publishes a free port, starts an apply, spawns a sidecar in its
- * own process group that listens on the port, then dies by SIGKILL, so launchd adopts the sidecar.
- */
-const SUPERVISOR = `
+const ORPHANING_SUPERVISOR = `
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -138,7 +134,7 @@ beforeEach(() => {
   execFileSync("git", ["init", "-q"], { cwd: checkout });
   fs.writeFileSync(path.join(checkout, "package.json"), `{"name":"app"}`);
   fs.writeFileSync(path.join(checkout, "server.mjs"), FIXTURE);
-  fs.writeFileSync(path.join(checkout, "supervisor.mjs"), SUPERVISOR);
+  fs.writeFileSync(path.join(checkout, "supervisor.mjs"), ORPHANING_SUPERVISOR);
 });
 
 afterEach(() => {
