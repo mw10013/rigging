@@ -11,7 +11,8 @@
   "scripts": {
     "build": "vpx ./scripts/pack.ts",
     "smoke": "vpx ./scripts/smoke.ts",
-    "prepare": "vp config"
+    "prepare": "vp config",
+    "verify:server-start": "verification/server-start/check.sh"
   },
   "dependencies": {
     "@effect/platform-node": "4.1.4",
