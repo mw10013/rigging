@@ -8,8 +8,8 @@ it. Shopify dev tooling lives in `@mw10013/shopify-app-cloudflare`, which builds
 pnpm add -D @mw10013/rigging
 ```
 
-Import a module by its layer, for example `import { app } from "@mw10013/rigging/core/app"`. The
-package manifest, `src/package.json`, lists every export. A module it does not list is internal.
+Import a module by its layer, for example `import { app } from "@mw10013/rigging/core/app"`. A
+module the package's `exports` does not list is internal.
 
 ## The `rigging` command
 
@@ -29,21 +29,11 @@ A server picks its own port. The command writes `{"port": <n>, "url": "<optional
 file that `$RIGGING_ENDPOINT` names. A Vite server does it with the `serverEndpoint()` plugin
 from `core/server-endpoint`.
 
-`start` and `status` print the status JSON. Its `state` is `running`, `starting`, `degraded`,
-`stopped` or `orphaned`, and it carries the `port` and `url`. `status` exits 0 when the state is
-`running`, and 3 otherwise. A failure prints
-`{"rigging": 1, "error": {"_tag", "message"}}` and exits 1. Read the port from
-`rigging server status`, never from a remembered value.
-
-State lives in `.rigging/servers/<name>/`, which ignores itself.
-
 ## Testing
 
-Apps run Vitest projects `unit`, `browser` and, on Cloudflare, `integ`, plus Playwright specs
-against a server that `rigging server` runs. The presets in `core/test`, `core/browser-test`
-and `cloudflare/test` each return a plain config object to spread and override. Each run keeps
-its results in `.test-results/<test|e2e>/<start time>/`. `fixtures/local` is a working local
-app on the presets.
+The presets in `core/test`, `core/browser-test` and `cloudflare/test` each return a plain config
+object to spread and override. [`fixtures/local`](https://github.com/mw10013/rigging/tree/main/fixtures/local) is a working
+local app on the presets.
 
 ## Developing
 
@@ -51,8 +41,8 @@ app on the presets.
 vp install
 vp check
 vp test run
-vp run build        # dist/: the package as published
-vp run smoke        # pack, install the tarball into a copy of fixtures/local, run its suites
+vp run build
+vp run smoke
 ```
 
 To release, bump the version in the root `package.json` on `main`, then push the tag
