@@ -103,8 +103,9 @@ const alive = (pid: number) => {
 const signal = (pid: number, name: NodeJS.Signals) => {
   try {
     process.kill(pid, name);
-  } catch {
-    // Gone already.
+  } catch (error) {
+    if (!Predicate.hasProperty(error, "code") || error.code !== "ESRCH")
+      throw error;
   }
 };
 
