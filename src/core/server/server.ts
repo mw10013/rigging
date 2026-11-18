@@ -654,9 +654,10 @@ export const start = Effect.fn("Server.start")(function* (
         `ok    stopping the orphaned ${name} server (group ${String(record.value.group)})`,
       );
       yield* stopRecorded(root, name, record.value);
+    } else {
+      yield* endMarked(record.value.run);
+      yield* removeFiles(root, name);
     }
-    yield* endMarked(record.value.run);
-    yield* removeFiles(root, name);
   }
 
   const runId = newRunId();
