@@ -41,7 +41,7 @@ import {
   ResettableDeployed,
   STAGE_RUN,
   StageRun,
-} from "#rigging/cloudflare/stage.ts";
+} from "./stage.ts";
 
 const isDeployed = Schema.is(Deployed);
 

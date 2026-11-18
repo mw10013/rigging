@@ -144,18 +144,6 @@ const signal = (pid: number, name: NodeJS.Signals | 0) =>
 
 const groupAlive = (group: number) => signal(-group, 0);
 
-const commandLine = Effect.fn("Server.commandLine")(function* (pid: number) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const text = yield* spawner
-    .string(
-      ChildProcess.make("ps", ["-o", "command=", "-p", String(pid)], {
-        stdin: "ignore",
-      }),
-    )
-    .pipe(Effect.orElseSucceed(() => ""));
-  return text.trim();
-});
-
 const output = Effect.fn("Server.output")(function* (
   program: string,
   args: readonly string[],
@@ -164,6 +152,11 @@ const output = Effect.fn("Server.output")(function* (
   return yield* spawner
     .string(ChildProcess.make(program, args, { stdin: "ignore" }))
     .pipe(Effect.orElseSucceed(() => ""));
+});
+
+const commandLine = Effect.fn("Server.commandLine")(function* (pid: number) {
+  const text = yield* output("ps", ["-o", "command=", "-p", String(pid)]);
+  return text.trim();
 });
 
 const numbers = (text: string) =>

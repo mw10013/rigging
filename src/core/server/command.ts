@@ -1,6 +1,3 @@
-import * as Argument from "effect/cli/Argument";
-import * as Command from "effect/cli/Command";
-import * as Flag from "effect/cli/Flag";
 /**
  * The CLI. `start` and `status` print one JSON document on stdout
  * ({@link StatusJson}), versioned by `rigging: 1`; human lines go to stderr. A
@@ -9,6 +6,9 @@ import * as Flag from "effect/cli/Flag";
  *
  * @module
  */
+import * as Argument from "effect/cli/Argument";
+import * as Command from "effect/cli/Command";
+import * as Flag from "effect/cli/Flag";
 import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";

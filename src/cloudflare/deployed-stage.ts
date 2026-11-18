@@ -23,11 +23,14 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import { app } from "#rigging/core/app.ts";
+import { runCommand } from "#rigging/core/command.ts";
+
 import {
   checkStageEnv,
   type StageFieldEnv,
   type StageFields,
-} from "#rigging/cloudflare/deployed-stack.ts";
+} from "./deployed-stack.ts";
 import {
   branchOf,
   Deployed,
@@ -35,9 +38,7 @@ import {
   STAGE_RUN,
   type StageRun,
   workerNameOf,
-} from "#rigging/cloudflare/stage.ts";
-import { app } from "#rigging/core/app.ts";
-import { runCommand } from "#rigging/core/command.ts";
+} from "./stage.ts";
 
 class StageError extends Schema.TaggedError<StageError>()("StageError", {
   message: Schema.String,

@@ -72,14 +72,7 @@ describe("app", () => {
   it("fails with a NoAppError outside any repository", () => {
     const outside = path.join(scratch, "nowhere/at/all");
     fs.mkdirSync(outside, { recursive: true });
-    const error = (() => {
-      try {
-        app(outside);
-      } catch (caught) {
-        return caught;
-      }
-    })();
-    expect(error).toBeInstanceOf(NoAppError);
-    expect((error as NoAppError).message).toContain(outside);
+    expect(() => app(outside)).toThrow(NoAppError);
+    expect(() => app(outside)).toThrow(outside);
   });
 });
