@@ -69,6 +69,26 @@ export const PerDeveloperStage = Schema.TemplateLiteralParser([
 );
 export type PerDeveloperStage = typeof PerDeveloperStage.Type;
 
+export class InvalidUserError extends Schema.TaggedError<InvalidUserError>()(
+  "InvalidUserError",
+  {
+    user: Schema.UndefinedOr(Schema.String),
+  },
+) {
+  override get message() {
+    return `$USER must be lowercase letters and digits to name a stage, got ${JSON.stringify(this.user)}`;
+  }
+}
+
+/** The same in every checkout: each checkout keeps its per-developer stages in its own `.alchemy/`. */
+export const stageOf = (
+  environment: PerDeveloper,
+  user: string | undefined,
+): Effect.Effect<string, InvalidUserError> =>
+  Schema.encodeUnknownEffect(PerDeveloperStage)({ environment, user }).pipe(
+    Effect.mapError(() => new InvalidUserError({ user })),
+  );
+
 const TestFileSuffix = Schema.String.check(
   Schema.isPattern(/^[a-z][a-z0-9]*$/u),
 );

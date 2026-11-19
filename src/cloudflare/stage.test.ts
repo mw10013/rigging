@@ -7,8 +7,10 @@ import * as Schema from "effect/Schema";
 import {
   Deployed,
   environmentOf,
+  InvalidUserError,
   PerDeveloperStage,
   ResettableDeployed,
+  stageOf,
   TestFileStage,
   UnknownStageError,
   workerNameOf,
@@ -59,6 +61,26 @@ describe("stage names", () => {
         assert.deepStrictEqual(
           exit,
           Exit.die(new UnknownStageError({ stage })),
+        );
+      }),
+    );
+});
+
+describe("a checkout's stage", () => {
+  it("names each per-developer environment's stage for the user", () => {
+    assert.strictEqual(Effect.runSync(stageOf("dev", "mw")), "dev-mw");
+    assert.strictEqual(Effect.runSync(stageOf("test", "mw2")), "test-mw2");
+    assert.strictEqual(Effect.runSync(stageOf("e2e", "mw")), "e2e-mw");
+  });
+
+  for (const user of ["Mike", "m.w", "", undefined])
+    it.effect(`refuses the user ${JSON.stringify(user)}`, () =>
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(stageOf("dev", user));
+        assert.instanceOf(error, InvalidUserError);
+        assert.strictEqual(
+          error.message,
+          `$USER must be lowercase letters and digits to name a stage, got ${JSON.stringify(user)}`,
         );
       }),
     );

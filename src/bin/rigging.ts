@@ -13,6 +13,8 @@ if (group === "server")
   runCli((await import("#rigging/core/server/command.ts")).command, args);
 else if (group === "stage")
   runCli((await import("#rigging/cloudflare/deployed-stage.ts")).command, args);
+else if (group === "local")
+  runCli((await import("#rigging/cloudflare/local.ts")).command, args);
 else if (group === "logs")
   runCli((await import("#rigging/cloudflare/logs.ts")).command, args);
 else {
@@ -21,6 +23,7 @@ else {
       "usage: rigging <command> [...]",
       "",
       "  server   start, stop, status and logs of this app's local servers",
+      "  local    this checkout's dev and e2e stages: start a server, destroy a stage (Cloudflare)",
       "  stage    staging and production deploys on Workers Builds (Cloudflare)",
       "  logs     a deployed stage's Worker logs (Cloudflare)",
       "",
