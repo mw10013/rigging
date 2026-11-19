@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "vp test run",
-    "e2e:start": "rigging server start e2e -- env -u FORCE_COLOR NO_COLOR=1 vp dev --clearScreen false",
+    "e2e:start": "rigging server start e2e -- vp dev --clearScreen false",
     "e2e:stop": "rigging server stop e2e",
     "test:e2e": "vp run e2e:start && playwright test"
   },
