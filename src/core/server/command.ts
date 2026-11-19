@@ -19,7 +19,7 @@ import { command as port } from "#rigging/core/server/port.ts";
 import { RunId, ServerName } from "./domain.ts";
 import * as Server from "./server.ts";
 
-const appRoot = Effect.try({
+export const appRoot = Effect.try({
   try: () => app().root,
   catch: (error) =>
     error instanceof NoAppError
@@ -27,10 +27,10 @@ const appRoot = Effect.try({
       : new NoAppError({ directory: process.cwd() }),
 });
 
-const printJson = (value: unknown) =>
+export const printJson = (value: unknown) =>
   Console.log(JSON.stringify(value, null, 2));
 
-const reported = <
+export const reported = <
   A,
   E extends { readonly _tag: string; readonly message: string },
   R,
@@ -55,7 +55,7 @@ const name = Argument.String("name").pipe(
   Argument.withDescription("The server's name in this checkout, e.g. dev"),
 );
 
-const commandArguments = Argument.String("command").pipe(
+export const commandArguments = Argument.String("command").pipe(
   Argument.atLeast(1),
   Argument.withDescription("The server's command and its arguments, after --"),
 );
