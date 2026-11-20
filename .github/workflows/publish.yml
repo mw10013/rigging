@@ -2,19 +2,50 @@ name: Publish
 
 # A pushed tag v<version> publishes that version to npm. npm trusts this
 # workflow (trusted publishing), so the repository stores no npm token.
+# The run succeeds only once npm serves the new version, so watching it answers "installable now".
 on:
   push:
     tags: ["v*"]
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
 jobs:
   publish:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: The tag matches package.json
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          }
+      # The tag is usually pushed right after the merge, so CI on main may not have registered or finished yet.
+      - name: CI passed on main for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for attempt in $(seq 1 20); do
+            id=$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --event push \
+              --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            test -n "$id" && break
+            echo "no CI run on main for $GITHUB_SHA yet ($attempt/20)"
+            sleep 15
+          done
+          test -n "$id" || {
+            echo "::error::no CI run on main for $GITHUB_SHA after 5 minutes; tag a commit on main"
+            exit 1
+          }
+          gh run watch "$id" --exit-status --interval 30 > /dev/null || {
+            echo "::error::CI run $id for $GITHUB_SHA did not succeed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id"
+            exit 1
+          }
+          echo "CI run $id passed for $GITHUB_SHA"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -22,19 +53,11 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       # rigging server rotates its logs with s6-log.
-      - run: brew install s6
+      - run: sudo apt-get update && sudo apt-get install -y s6
       - run: pnpm install --frozen-lockfile
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-      - name: The tag matches package.json
-        run: |
-          version=$(node -p 'require("./package.json").version')
-          test "$GITHUB_REF_NAME" = "v$version" || {
-            echo "tag $GITHUB_REF_NAME does not match package.json version $version"
-            exit 1
-          }
-      - run: vp check
-      - run: vp test run
       - run: npm install -g npm@latest
+      # CI tests the source; smoke builds dist/ and tests the packed tarball a consumer installs.
       - run: vp run smoke
       # npm "auto-corrects" a manifest it dislikes by dropping fields, such as a bin, and
       # only warns. Fail instead.
@@ -43,3 +66,18 @@ jobs:
           npm publish ./dist --dry-run 2>&1 | tee publish-dry-run.txt
           ! grep -q "auto-corrected" publish-dry-run.txt
       - run: npm publish ./dist --provenance
+      - name: npm serves the new version
+        working-directory: dist
+        run: |
+          name=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          for attempt in $(seq 1 40); do
+            if [ "$(npm view "$name@$version" version --prefer-online 2>/dev/null)" = "$version" ]; then
+              echo "npm serves $name@$version"
+              exit 0
+            fi
+            echo "npm does not serve $name@$version yet ($attempt/40)"
+            sleep 15
+          done
+          echo "::error::npm did not serve $name@$version within 10 minutes of publishing"
+          exit 1
