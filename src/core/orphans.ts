@@ -1,6 +1,7 @@
 /**
  * An integration run's workerd outlives a test process that dies mid-run: Alchemy's sidecar,
- * workerd's parent, exits without stopping it, so it holds its ports with pid 1 as its parent.
+ * workerd's parent, exits without stopping it, so it holds its ports with pid 1 as its parent, or,
+ * in a systemd session, the user manager, a child subreaper.
  *
  * @module
  */
@@ -38,7 +39,13 @@ const output = (program: string, args: readonly string[]) => {
   }
 };
 
-export const parseProcesses = (text: string) =>
+interface Process {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly command: string;
+}
+
+export const parseProcesses = (text: string): readonly Process[] =>
   Array.getSomes(
     text.split("\n").map((line) => {
       const fields =
@@ -64,14 +71,23 @@ export const parseCwds = (text: string) => {
   return cwds;
 };
 
+/** The processes whose parent is pid 1 or a systemd manager, which adopts what its descendants orphan. */
+export const orphaned = (processes: readonly Process[]) => {
+  const commands = new Map(processes.map(({ pid, command }) => [pid, command]));
+  return processes.filter(
+    ({ ppid }) =>
+      ppid === 1 || path.basename(commands.get(ppid) ?? "") === "systemd",
+  );
+};
+
 export const isWithin = (cwd: string, directory: string) =>
   cwd === directory || cwd.startsWith(`${directory}${path.sep}`);
 
 export const orphansIn = (directory: string): readonly Orphan[] => {
   const root = fs.realpathSync(directory);
-  const parentless = parseProcesses(
-    output("ps", ["-A", "-o", "pid=,ppid=,comm="]),
-  ).filter((process) => process.ppid === 1);
+  const parentless = orphaned(
+    parseProcesses(output("ps", ["-A", "-o", "pid=,ppid=,comm="])),
+  );
   if (parentless.length === 0) return [];
   const cwds = parseCwds(
     output("lsof", [

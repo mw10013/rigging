@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   isWithin,
+  orphaned,
   orphansIn,
   parseCwds,
   parseProcesses,
@@ -108,6 +109,24 @@ describe("parsers", () => {
       { pid: 12, ppid: 1, command: "/Applications/My App/bin/workerd" },
       { pid: 13, ppid: 12, command: "sh" },
     ]);
+  });
+
+  it("takes a workerd under pid 1 or a systemd user manager as orphaned, not one under a shell", () => {
+    const table = parseProcesses(
+      [
+        "    1     0 /usr/lib/systemd/systemd",
+        "  900     1 systemd",
+        "  901     1 workerd",
+        "  902   900 workerd",
+        "  950   900 bash",
+        "  951   950 workerd",
+      ].join("\n"),
+    );
+    expect(
+      orphaned(table)
+        .filter(({ command }) => command === "workerd")
+        .map(({ pid }) => pid),
+    ).toEqual([901, 902]);
   });
 
   it("reads lsof's pid and name fields", () => {

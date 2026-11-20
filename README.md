@@ -24,8 +24,9 @@ rigging logs show|follow|wait <stage>         # Cloudflare: a deployed stage's W
 ```
 
 `rigging server` works on the nearest folder upward that holds a `package.json`, so each
-checkout, and each app in a monorepo, has its own servers. It logs with `s6-log`
-(`brew install s6`).
+checkout, and each app in a monorepo, has its own servers. It logs with `s6-log`:
+`brew install s6` on macOS, `yay -S s6` (AUR) on Omarchy or Arch, `sudo apt-get install s6`
+on Ubuntu.
 
 A server picks its own port. The command writes `{"port": <n>, "url": "<optional>"}` to the
 file that `$RIGGING_ENDPOINT` names. A Vite server does it with the `serverEndpoint()` plugin
