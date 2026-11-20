@@ -155,6 +155,11 @@ const logs = Command.make(
   "logs",
   {
     name,
+    run: Flag.String("run").pipe(
+      Flag.withSchema(RunId),
+      Flag.optional,
+      Flag.withDescription("The run whose log to read; default the latest"),
+    ),
     lines: Flag.Int("lines").pipe(
       Flag.withAlias("n"),
       Flag.withDefault(100),
@@ -163,16 +168,21 @@ const logs = Command.make(
     follow: Flag.Boolean("follow").pipe(
       Flag.withAlias("f"),
       Flag.withDefault(false),
-      Flag.withDescription("Keep printing new lines, across rotation"),
+      Flag.withDescription(
+        "Keep printing new lines, across rolls, until the run's exit line",
+      ),
     ),
   },
-  ({ name, lines, follow }) =>
+  ({ name, run, lines, follow }) =>
     reported(
       Effect.gen(function* () {
-        yield* Server.logs(yield* appRoot, name, lines, follow);
+        yield* Server.logs(yield* appRoot, name, {
+          run,
+          reading: { _tag: follow ? "Follow" : "Print", lines },
+        });
       }),
     ),
-).pipe(Command.withShortDescription("Print or follow the server's log"));
+).pipe(Command.withShortDescription("Print or follow a run's log"));
 
 export const command = Command.make("server").pipe(
   Command.withDescription(

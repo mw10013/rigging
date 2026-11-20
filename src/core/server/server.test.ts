@@ -2,6 +2,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import * as ByteSize from "effect/ByteSize";
 import * as DateTime from "effect/DateTime";
@@ -57,6 +58,7 @@ if (process.argv[2] === "apply-failed") {
   console.log("[t] INFO: Failed: 0 succeeded, 1 failed (6.3s)");
   console.log("[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.\\nRewrittenMigrationHistoryError: changed 0001_init.sql\\n    at migrate (migrations.ts:1:1)\\n    at apply (Apply.ts:2:2)");
 }
+if (process.argv[2] === "ready-later") setTimeout(() => console.log("ready later"), 2000);
 if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(() => process.exit(0)); });
 }
 `;
@@ -86,9 +88,11 @@ const serverWith = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) => {
   return {
     code: result.status,
     stdout: result.stdout,
-    json: (result.stdout.trim() === ""
-      ? undefined
-      : JSON.parse(result.stdout)) as Printed,
+    get json() {
+      return (
+        result.stdout.trim() === "" ? undefined : JSON.parse(result.stdout)
+      ) as Printed;
+    },
     stderr: result.stderr,
   };
 };
@@ -97,6 +101,29 @@ const serverIn = (cwd: string, ...args: string[]) =>
   serverWith(cwd, {}, ...args);
 
 const server = (...args: string[]) => serverIn(checkout, ...args);
+
+const serverLater = (...args: string[]) => {
+  const child = spawn("vpx", [ENTRY, "server", ...args], {
+    cwd: checkout,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString();
+  });
+  const exited = new Promise<{ code: number | null; stdout: string }>(
+    (resolve) => {
+      child.on("close", (code) => {
+        resolve({ code, stdout });
+      });
+    },
+  );
+  return { exited, printed: () => stdout };
+};
+
+const until = async (check: () => boolean) => {
+  while (!check()) await sleep(100);
+};
 
 const ISO = String.raw`\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z`;
 
@@ -453,6 +480,54 @@ see ${now.json.log}`;
     expect(restarted.json.state).toBe("running");
     expect(restarted.json.run).not.toBe(started.json.run);
     expect(alive(started.json.group)).toBe(false);
+  }, 60_000);
+});
+
+describe("rigging server logs", () => {
+  const exitLine = (run: string) =>
+    new RegExp(`^${ISO} ==== dev exit run=${run} code=0$`, "u");
+
+  it("prints the last lines of the latest run, or of the run --run names", () => {
+    const first = server("start", "dev", "--", "node", "server.mjs").json;
+    expect(server("stop", "dev").code).toBe(0);
+    const second = server("start", "dev", "--", "node", "server.mjs").json;
+
+    const latest = server("logs", "dev");
+    expect(latest.code).toBe(0);
+    expect(latest.stdout.split("\n")[0]).toMatch(
+      new RegExp(`^${ISO} ==== dev start ${ISO} run=${second.run}$`, "u"),
+    );
+    expect(server("logs", "dev", "-n", "2").stdout).toBe(
+      `${latest.stdout.trimEnd().split("\n").slice(-2).join("\n")}\n`,
+    );
+
+    const earlier = server("logs", "dev", "--run", first.run, "-n", "1");
+    expect(earlier.stdout.trimEnd()).toMatch(exitLine(first.run));
+    expect(earlier.stdout).not.toContain(second.run);
+
+    const unknown = server("logs", "dev", "--run", "ffffffff");
+    expect(unknown.code).toBe(1);
+    expect(unknown.json.error._tag).toBe("NoRunLogError");
+  }, 60_000);
+
+  it("follows a run until its exit line, then exits by itself", async () => {
+    const started = server("start", "dev", "--", "node", "server.mjs").json;
+    const follow = serverLater("logs", "dev", "-f");
+    await until(() => follow.printed().includes("a stderr line"));
+    expect(server("stop", "dev").code).toBe(0);
+    const followed = await follow.exited;
+    expect(followed.code).toBe(0);
+    const lines = followed.stdout.trimEnd().split("\n");
+    expect(lines.at(-1)).toMatch(exitLine(started.run));
+    expect(lines.filter((line) => line.includes("got SIGTERM"))).toHaveLength(
+      1,
+    );
+
+    const again = server("logs", "dev", "-f");
+    expect(again.code).toBe(0);
+    expect(again.stdout.trimEnd().split("\n").at(-1)).toMatch(
+      exitLine(started.run),
+    );
   }, 60_000);
 });
 

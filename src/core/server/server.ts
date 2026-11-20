@@ -27,12 +27,14 @@ import {
   EndpointJson,
   exitMarker,
   files,
+  isExitLine,
   listenerOf,
   type PortListener,
   RUN_LOG_ROLL_AT,
   runFilesToPrune,
   RunId,
   runLog,
+  runOfLog,
   runOutput,
   type ServerName,
   type ServerRecord,
@@ -119,10 +121,13 @@ export class StopTimeoutError extends Schema.TaggedError<StopTimeoutError>()(
 
 export class NoRunLogError extends Schema.TaggedError<NoRunLogError>()(
   "NoRunLogError",
-  { name: Schema.String },
+  { name: Schema.String, run: Schema.Option(Schema.String) },
 ) {
   override get message() {
-    return `no run of the ${this.name} server has logged yet`;
+    return Option.match(this.run, {
+      onNone: () => `no run of the ${this.name} server has logged yet`,
+      onSome: (run) => `the ${this.name} server has no log of run ${run}`,
+    });
   }
 }
 
@@ -714,7 +719,7 @@ const sight = Effect.fn("Server.sight")(function* (
 export const status = (root: string, name: ServerName) =>
   sight(root, name).pipe(Effect.map(({ status }) => status));
 
-const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
+const runLogOf = Effect.fn("Server.runLogOf")(function* (
   root: string,
   name: ServerName,
   runId: RunId,
@@ -722,9 +727,21 @@ const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
   const file = (yield* runNames(root, name)).find((found) =>
     found.endsWith(`-${runId}.log`),
   );
-  if (file === undefined)
+  return Option.map(
+    Option.fromNullishOr(file),
+    (found) => `${files(name).runs}/${found}`,
+  );
+});
+
+const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
+  root: string,
+  name: ServerName,
+  runId: RunId,
+) {
+  const found = yield* runLogOf(root, name, runId);
+  if (Option.isNone(found))
     return `(run ${runId} wrote nothing to ${files(name).runs})`;
-  const log = `${files(name).runs}/${file}`;
+  const log = found.value;
   return Option.match(
     Option.flatMap(yield* readFile(yield* at(root, log)), runOutput),
     {
@@ -893,30 +910,48 @@ export const stop = Effect.fn("Server.stop")(function* (
   return true;
 });
 
+export type Reading =
+  | { readonly _tag: "Print"; readonly lines: number }
+  | { readonly _tag: "Follow"; readonly lines: number };
+
 export const logs = Effect.fn("Server.logs")(function* (
   root: string,
   name: ServerName,
-  lines: number,
-  follow: boolean,
+  options: { readonly run: Option.Option<RunId>; readonly reading: Reading },
 ) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const log = yield* recordedOrNewestRunLog(
-    root,
-    name,
-    yield* readRecord(root, name),
+  const fs = yield* FileSystem.FileSystem;
+  const log = yield* Option.match(options.run, {
+    onSome: (runId) => runLogOf(root, name, runId),
+    onNone: Effect.fnUntraced(function* () {
+      return yield* recordedOrNewestRunLog(
+        root,
+        name,
+        yield* readRecord(root, name),
+      );
+    }),
+  });
+  const found = Option.flatMap(log, (relative) =>
+    Option.map(runOfLog(relative), (runId) => ({ relative, runId })),
   );
-  if (Option.isNone(log)) return yield* new NoRunLogError({ name });
-  // A run's log rolls by renaming it; -F reopens it by name.
-  yield* spawner.exitCode(
-    ChildProcess.make(
-      "tail",
-      [
-        ...(follow ? ["-F"] : []),
-        "-n",
-        String(lines),
-        yield* at(root, log.value),
-      ],
-      { stdin: "ignore", stdout: "inherit", stderr: "inherit" },
-    ),
+  if (Option.isNone(found))
+    return yield* new NoRunLogError({ name, run: options.run });
+  const { relative, runId } = found.value;
+  const path = yield* at(root, relative);
+  const { reading } = options;
+  if (reading._tag === "Print") {
+    const text = yield* fs
+      .readFileString(path)
+      .pipe(
+        Effect.mapError((cause) => new LogReadError({ name, path, cause })),
+      );
+    const lines = text.split("\n");
+    if (lines.at(-1) === "") lines.pop();
+    for (const line of lines.slice(Math.max(lines.length - reading.lines, 0)))
+      yield* Console.log(line);
+    return;
+  }
+  yield* runLogLines(path, { name, last: reading.lines }).pipe(
+    Stream.takeUntil((line) => isExitLine(line, name, runId)),
+    Stream.runForEach(Console.log),
   );
 });
