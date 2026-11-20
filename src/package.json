@@ -34,10 +34,10 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@alchemy.run/cloudflare": "2.0.0-beta.85",
+    "@alchemy.run/cloudflare": ">=2.0.0-beta.85 <3",
     "@effect/platform-node": "^4.0.5",
     "@vitest/browser-playwright": "^5.0.5",
-    "alchemy": "2.0.0-beta.85",
+    "alchemy": ">=2.0.0-beta.85 <3",
     "effect": "^4.0.5",
     "vite": "*",
     "vite-plus": "^1.4.0",
