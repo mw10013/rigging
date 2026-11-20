@@ -199,11 +199,6 @@ export class LogReadError extends Schema.TaggedError<LogReadError>()(
 const LOG_POLL = Duration.millis(250);
 const LOG_READ_SIZE = 64 * 1024;
 
-/**
- * The run log's complete lines as they are written, from the start of the file, or only the last
- * `last` of those already written. A roll shows as the path naming another inode: the old file is
- * read to its end, then the new one from its start. The stream ends only when its consumer stops.
- */
 export const runLogLines = (
   path: string,
   options: { readonly name: ServerName; readonly last?: number },
@@ -229,21 +224,24 @@ export const runLogLines = (
             text += decoder.decode(bytes.value, { stream: true });
           }
         });
-      const poll = Effect.gen(function* () {
+      const followRoll = Effect.gen(function* () {
         const open = yield* Ref.get(current);
-        let text = yield* drain(open.file);
         const now = yield* fs.stat(path).pipe(Effect.option);
         if (
-          Option.isSome(now) &&
-          Option.getOrUndefined(now.value.ino) !==
+          Option.isNone(now) ||
+          Option.getOrUndefined(now.value.ino) ===
             Option.getOrUndefined(open.ino)
-        ) {
-          text += yield* drain(open.file);
-          yield* Scope.close(open.handle, Exit.void);
-          const next = yield* openFile;
-          yield* Ref.set(current, next);
-          text += yield* drain(next.file);
-        }
+        )
+          return "";
+        const rest = yield* drain(open.file);
+        yield* Scope.close(open.handle, Exit.void);
+        const next = yield* openFile;
+        yield* Ref.set(current, next);
+        return rest + (yield* drain(next.file));
+      });
+      const poll = Effect.gen(function* () {
+        const open = yield* Ref.get(current);
+        const text = (yield* drain(open.file)) + (yield* followRoll);
         const lines = `${yield* Ref.get(partial)}${text}`.split("\n");
         yield* Ref.set(partial, lines.pop() ?? "");
         return lines;
