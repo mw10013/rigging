@@ -1,16 +1,20 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:os";
 
+import * as ByteSize from "effect/ByteSize";
 import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import {
@@ -29,6 +33,7 @@ import {
   ServerRecordJson,
   SERVERS_DIRECTORY,
   type ServerState,
+  stamped,
   startMarker,
   stateOf,
 } from "./domain.ts";
@@ -127,6 +132,64 @@ export class LoggerExitedError extends Schema.TaggedError<LoggerExitedError>()(
     return `s6-log exited ${String(this.code)} while the ${this.name} server ran; the server was stopped`;
   }
 }
+
+export class LogWriteError extends Schema.TaggedError<LogWriteError>()(
+  "LogWriteError",
+  { name: Schema.String, path: Schema.String, cause: Schema.Defect() },
+) {
+  override get message() {
+    return `could not write ${this.path}, the ${this.name} server's log`;
+  }
+}
+
+/**
+ * Appends lines to a run's log, each stamped with the instant of its write, and rolls the file to
+ * `<path>.1` first when the write would pass `cap`. Writes never overlap: the pump writes, and the
+ * exit marker follows once the pump has drained.
+ */
+export const openRunLog = Effect.fn("Server.openRunLog")(function* (
+  path: string,
+  options: { readonly name: ServerName; readonly cap: ByteSize.ByteSize },
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const scope = yield* Scope.Scope;
+  const failed = (cause: unknown) =>
+    new LogWriteError({ name: options.name, path, cause });
+  const openFile = Effect.gen(function* () {
+    const handle = yield* Scope.fork(scope);
+    const file = yield* fs
+      .open(path, { flag: "a" })
+      .pipe(Scope.provide(handle));
+    return { handle, file, size: (yield* file.stat).size };
+  });
+  const current = yield* Ref.make(
+    yield* openFile.pipe(Effect.mapError(failed)),
+  );
+  const encoder = new TextEncoder();
+  const write = (lines: readonly string[]) =>
+    Effect.gen(function* () {
+      const at = yield* DateTime.now;
+      const chunk = encoder.encode(
+        lines.map((line) => `${stamped(at, line)}\n`).join(""),
+      );
+      const length = ByteSize.bytes(chunk.length);
+      let open = yield* Ref.get(current);
+      if (
+        ByteSize.isGreaterThan(open.size, ByteSize.zero) &&
+        ByteSize.isGreaterThan(ByteSize.sum(open.size, length), options.cap)
+      ) {
+        yield* fs.rename(path, `${path}.1`);
+        yield* Scope.close(open.handle, Exit.void);
+        open = yield* openFile;
+      }
+      yield* open.file.writeAll(chunk);
+      yield* Ref.set(current, {
+        ...open,
+        size: ByteSize.sum(open.size, length),
+      });
+    }).pipe(Effect.mapError(failed));
+  return { write };
+});
 
 const at = Effect.fn("Server.at")(function* (root: string, relative: string) {
   const path = yield* Path.Path;
