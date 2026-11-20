@@ -58,7 +58,7 @@ if (process.argv[2] === "apply-failed") {
   console.log("[t] INFO: Failed: 0 succeeded, 1 failed (6.3s)");
   console.log("[t] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.\\nRewrittenMigrationHistoryError: changed 0001_init.sql\\n    at migrate (migrations.ts:1:1)\\n    at apply (Apply.ts:2:2)");
 }
-if (process.argv[2] === "ready-later") setTimeout(() => console.log("ready later"), 2000);
+if (process.argv[2] === "ready-later") setTimeout(() => console.log("ready later"), 3000);
 if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(() => process.exit(0)); });
 }
 `;
@@ -508,6 +508,51 @@ describe("rigging server logs", () => {
     const unknown = server("logs", "dev", "--run", "ffffffff");
     expect(unknown.code).toBe(1);
     expect(unknown.json.error._tag).toBe("NoRunLogError");
+  }, 60_000);
+
+  it("waits for the first matching line written since --since, by default since it began", () => {
+    const before = new Date().toISOString();
+    expect(
+      server("start", "dev", "--", "node", "server.mjs", "ready-later").code,
+    ).toBe(0);
+
+    const ready = server("logs", "dev", "--wait", "ready l.ter");
+    expect(ready.code).toBe(0);
+    expect(ready.stdout).toMatch(new RegExp(`^${ISO} ready later\n$`, "u"));
+
+    const written = server(
+      "logs",
+      "dev",
+      "--wait",
+      "^listening on",
+      "--since",
+      before,
+    );
+    expect(written.code).toBe(0);
+    expect(written.stdout).toMatch(/ listening on \d+\n$/u);
+
+    const late = server(
+      "logs",
+      "dev",
+      "--wait",
+      "^listening on",
+      "--timeout",
+      "1",
+    );
+    expect(late.code).toBe(1);
+    expect(late.json.error._tag).toBe("LogWaitTimeoutError");
+  }, 60_000);
+
+  it("fails a wait whose run ends first, with the run's exit line", async () => {
+    const started = server("start", "dev", "--", "node", "server.mjs").json;
+    const wait = serverLater("logs", "dev", "--wait", "nope");
+    await sleep(1000);
+    expect(server("stop", "dev").code).toBe(0);
+    const waited = await wait.exited;
+    expect(waited.code).toBe(1);
+    const { error } = JSON.parse(waited.stdout) as Printed;
+    expect(error._tag).toBe("RunEndedError");
+    expect(error.message.split("\n").at(-1)).toMatch(exitLine(started.run));
   }, 60_000);
 
   it("follows a run until its exit line, then exits by itself", async () => {

@@ -7,11 +7,15 @@
  * @module
  */
 import * as Argument from "effect/cli/Argument";
+import * as CliError from "effect/cli/CliError";
 import * as Command from "effect/cli/Command";
 import * as Flag from "effect/cli/Flag";
 import * as Console from "effect/Console";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 import { app, NoAppError } from "#rigging/core/app.ts";
 import { command as port } from "#rigging/core/server/port.ts";
@@ -151,6 +155,9 @@ const status = Command.make("status", { name }, ({ name }) =>
   ),
 );
 
+const LOG_WAIT_TIMEOUT = Duration.seconds(60);
+const PRINTED_LINES = 100;
+
 const logs = Command.make(
   "logs",
   {
@@ -162,8 +169,10 @@ const logs = Command.make(
     ),
     lines: Flag.Int("lines").pipe(
       Flag.withAlias("n"),
-      Flag.withDefault(100),
-      Flag.withDescription("How many of the last lines to print"),
+      Flag.optional,
+      Flag.withDescription(
+        `How many of the last lines to print; default ${String(PRINTED_LINES)}`,
+      ),
     ),
     follow: Flag.Boolean("follow").pipe(
       Flag.withAlias("f"),
@@ -172,17 +181,79 @@ const logs = Command.make(
         "Keep printing new lines, across rolls, until the run's exit line",
       ),
     ),
-  },
-  ({ name, run, lines, follow }) =>
-    reported(
-      Effect.gen(function* () {
-        yield* Server.logs(yield* appRoot, name, {
-          run,
-          reading: { _tag: follow ? "Follow" : "Print", lines },
-        });
-      }),
+    wait: Flag.String("wait").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Print the first line, written at or after --since, whose text after its stamp matches this JavaScript regex, then exit",
+      ),
     ),
-).pipe(Command.withShortDescription("Print or follow a run's log"));
+    since: Flag.String("since").pipe(
+      Flag.withSchema(Schema.DateTimeUtcFromString),
+      Flag.optional,
+      Flag.withDescription(
+        "An ISO time, such as the time of your action; default now",
+      ),
+    ),
+    timeout: Flag.Int("timeout").pipe(
+      Flag.withDefault(Duration.toSeconds(LOG_WAIT_TIMEOUT)),
+      Flag.withDescription("Seconds --wait waits for a match"),
+    ),
+  },
+  Effect.fn("Command.logs")(function* ({
+    name,
+    run,
+    lines,
+    follow,
+    wait,
+    since,
+    timeout,
+  }) {
+    const now = yield* DateTime.now;
+    const reading = yield* Option.match(wait, {
+      onNone: () =>
+        Effect.succeed<Server.Reading>({
+          _tag: follow ? "Follow" : "Print",
+          lines: Option.getOrElse(lines, () => PRINTED_LINES),
+        }),
+      onSome: (source) =>
+        follow || Option.isSome(lines)
+          ? Effect.fail(
+              new CliError.UserError({
+                cause: source,
+                userMessage: "--wait does not combine with -f or -n",
+              }),
+            )
+          : Effect.try({
+              try: (): Server.Reading => ({
+                _tag: "Wait",
+                pattern: new RegExp(source, "u"),
+                since: Option.getOrElse(since, () => now),
+                timeout: Duration.seconds(timeout),
+              }),
+              catch: (cause) =>
+                new CliError.UserError({
+                  cause,
+                  userMessage: `--wait is not a valid regular expression: ${String(cause)}`,
+                }),
+            }),
+    });
+    yield* reported(
+      Effect.gen(function* () {
+        yield* Server.logs(yield* appRoot, name, { run, reading });
+      }),
+    );
+  }),
+).pipe(
+  Command.withShortDescription(
+    "Print, follow or wait for a line of a run's log",
+  ),
+  Command.withExamples([
+    {
+      command: 'rigging server logs dev --wait "ready in" --since "$at"',
+      description: "Wait for the first matching line written since $at",
+    },
+  ]),
+);
 
 export const command = Command.make("server").pipe(
   Command.withDescription(

@@ -42,8 +42,10 @@ import {
   SERVERS_DIRECTORY,
   type ServerState,
   stamped,
+  stampOf,
   startMarker,
   stateOf,
+  textOf,
 } from "./domain.ts";
 
 export const START_TIMEOUT = Duration.minutes(3);
@@ -910,9 +912,33 @@ export const stop = Effect.fn("Server.stop")(function* (
   return true;
 });
 
+export class LogWaitTimeoutError extends Schema.TaggedError<LogWaitTimeoutError>()(
+  "LogWaitTimeoutError",
+  { name: Schema.String, pattern: Schema.String, seconds: Schema.Number },
+) {
+  override get message() {
+    return `no line of the ${this.name} server's log matched /${this.pattern}/ within ${String(this.seconds)}s`;
+  }
+}
+
+export class RunEndedError extends Schema.TaggedError<RunEndedError>()(
+  "RunEndedError",
+  { name: Schema.String, run: Schema.String, exit: Schema.String },
+) {
+  override get message() {
+    return `the ${this.name} server's run ${this.run} ended before a line matched\n${this.exit}`;
+  }
+}
+
 export type Reading =
   | { readonly _tag: "Print"; readonly lines: number }
-  | { readonly _tag: "Follow"; readonly lines: number };
+  | { readonly _tag: "Follow"; readonly lines: number }
+  | {
+      readonly _tag: "Wait";
+      readonly pattern: RegExp;
+      readonly since: DateTime.Utc;
+      readonly timeout: Duration.Duration;
+    };
 
 export const logs = Effect.fn("Server.logs")(function* (
   root: string,
@@ -922,13 +948,10 @@ export const logs = Effect.fn("Server.logs")(function* (
   const fs = yield* FileSystem.FileSystem;
   const log = yield* Option.match(options.run, {
     onSome: (runId) => runLogOf(root, name, runId),
-    onNone: Effect.fnUntraced(function* () {
-      return yield* recordedOrNewestRunLog(
-        root,
-        name,
-        yield* readRecord(root, name),
-      );
-    }),
+    onNone: () =>
+      readRecord(root, name).pipe(
+        Effect.flatMap((record) => recordedOrNewestRunLog(root, name, record)),
+      ),
   });
   const found = Option.flatMap(log, (relative) =>
     Option.map(runOfLog(relative), (runId) => ({ relative, runId })),
@@ -950,8 +973,36 @@ export const logs = Effect.fn("Server.logs")(function* (
       yield* Console.log(line);
     return;
   }
-  yield* runLogLines(path, { name, last: reading.lines }).pipe(
-    Stream.takeUntil((line) => isExitLine(line, name, runId)),
-    Stream.runForEach(Console.log),
+  if (reading._tag === "Follow")
+    return yield* runLogLines(path, { name, last: reading.lines }).pipe(
+      Stream.takeUntil((line) => isExitLine(line, name, runId)),
+      Stream.runForEach(Console.log),
+    );
+  const { pattern, since, timeout } = reading;
+  const matched = yield* runLogLines(path, { name }).pipe(
+    Stream.filter(
+      (candidate) =>
+        isExitLine(candidate, name, runId) ||
+        (Option.exists(stampOf(candidate), (stamp) =>
+          DateTime.isGreaterThanOrEqualTo(stamp, since),
+        ) &&
+          pattern.test(textOf(candidate))),
+    ),
+    Stream.runHead,
+    Effect.timeoutOrElse({
+      duration: timeout,
+      orElse: () =>
+        Effect.fail(
+          new LogWaitTimeoutError({
+            name,
+            pattern: pattern.source,
+            seconds: Duration.toSeconds(timeout),
+          }),
+        ),
+    }),
   );
+  const line = yield* Effect.orDie(Effect.fromOption(matched));
+  if (isExitLine(line, name, runId))
+    return yield* new RunEndedError({ name, run: runId, exit: line });
+  yield* Console.log(line);
 });
