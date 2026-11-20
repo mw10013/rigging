@@ -1,3 +1,5 @@
+import * as ByteSize from "effect/ByteSize";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -39,9 +41,61 @@ export const files = (name: ServerName) => ({
   directory: `${SERVERS_DIRECTORY}/${name}`,
   record: `${SERVERS_DIRECTORY}/${name}/record.json`,
   endpoint: `${SERVERS_DIRECTORY}/${name}/endpoint.json`,
-  logDirectory: `${SERVERS_DIRECTORY}/${name}/log`,
-  log: `${SERVERS_DIRECTORY}/${name}/log/current`,
+  runs: `${SERVERS_DIRECTORY}/${name}/runs`,
+  legacyLog: `${SERVERS_DIRECTORY}/${name}/log`,
 });
+
+export const RUN_LOG_ROLL_AT = ByteSize.mebibytes(50);
+export const RUNS_KEPT = 20;
+export const RUNS_BYTES = ByteSize.mebibytes(100);
+
+export const runLogName = (startedAt: string, run: RunId) =>
+  `${startedAt}-${run}.log`;
+
+export const runLog = (
+  record: Pick<ServerRecord, "name" | "startedAt" | "run">,
+) => `${files(record.name).runs}/${runLogName(record.startedAt, record.run)}`;
+
+export const stamped = (at: DateTime.Utc, line: string) =>
+  line === "" ? "" : `${DateTime.formatIso(at)} ${line}`;
+
+const RUN_FILE = /^(?<log>.+\.log)(?:\.1)?$/u;
+
+export const runFilesToPrune = (
+  files: readonly { readonly name: string; readonly size: ByteSize.ByteSize }[],
+): readonly string[] => {
+  const runs = new Map<
+    string,
+    {
+      readonly log: string;
+      readonly names: readonly string[];
+      readonly size: ByteSize.ByteSize;
+    }
+  >();
+  for (const file of files) {
+    const log = RUN_FILE.exec(file.name)?.groups?.log;
+    if (log === undefined) continue;
+    const run = runs.get(log) ?? { log, names: [], size: ByteSize.zero };
+    runs.set(log, {
+      log,
+      names: [...run.names, file.name],
+      size: ByteSize.sum(run.size, file.size),
+    });
+  }
+  const deleted: string[] = [];
+  let bytes = ByteSize.zero;
+  const newestFirst = [...runs.values()].toSorted((a, b) =>
+    a.log < b.log ? 1 : -1,
+  );
+  for (const [index, run] of newestFirst.entries()) {
+    bytes = ByteSize.sum(bytes, run.size);
+    const kept =
+      index < RUNS_KEPT - 1 &&
+      (index === 0 || ByteSize.isLessThanOrEqualTo(bytes, RUNS_BYTES));
+    if (!kept) deleted.push(...run.names);
+  }
+  return deleted;
+};
 
 const MARKER = "====";
 
@@ -73,36 +127,18 @@ export const exitMarker = (name: ServerName, run: RunId, ending: Ending) =>
 
 const RUN_OUTPUT_LINES = 60;
 
-/** `s6-log` puts a timestamp before each line, so a marker is found inside the line, not at its start. */
-const runLines = (
-  log: string,
-  name: ServerName,
-  run: RunId,
-): Option.Option<readonly string[]> => {
-  const lines = log.split("\n");
-  const start = lines.findIndex(
-    (line) =>
-      line.includes(`${MARKER} ${name} start `) && line.includes(`run=${run}`),
-  );
-  if (start === -1) return Option.none();
-  const after = lines.slice(start + 1);
-  const end = after.findIndex((line) =>
-    line.includes(`${MARKER} ${name} exit run=${run} `),
-  );
-  return Option.some(end === -1 ? after : after.slice(0, end + 1));
-};
+const STAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /u;
+const START = /^==== \S+ start /u;
 
-export const runOutput = (
-  log: string,
-  name: ServerName,
-  run: RunId,
-): Option.Option<string> =>
-  Option.flatMap(runLines(log, name, run), (lines) => {
-    const body = lines.filter((line) => line.trim() !== "");
-    return body.length === 0
-      ? Option.none()
-      : Option.some(body.slice(-RUN_OUTPUT_LINES).join("\n"));
+export const runOutput = (log: string): Option.Option<string> => {
+  const body = log.split("\n").filter((line) => {
+    const text = line.replace(STAMP, "");
+    return text.trim() !== "" && !START.test(text);
   });
+  return body.length === 0
+    ? Option.none()
+    : Option.some(body.slice(-RUN_OUTPUT_LINES).join("\n"));
+};
 
 export type Apply =
   | { readonly _tag: "None" }
@@ -132,29 +168,28 @@ const APPLY_EVENTS: readonly (readonly [RegExp, (text: string) => Apply])[] = [
 
 /**
  * Alchemy logs a failure report as one record, `alchemy dev: … failed; …` and then its cause on
- * the following lines, so the line after the header carries only `s6-log`'s timestamp and starts
+ * the following lines, so the line after the header carries only the runner's stamp and starts
  * with the cause's `<Tag>: <message>`.
  */
 const REPORT = /^alchemy dev: (?:apply|run) failed;/u;
-const S6_STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ {2}/u;
 
 /** `[<fqn>] fail (<mode>) — <Tag>: <message> (<elapsed>)`, which a resource logs as it fails. */
 const RESOURCE_FAILURE =
   /\] ERROR: \[[^\]]+\] fail(?: \([^)]*\))? — (?<message>.+?)(?: {1,2}\((?:\d+(?:\.\d+)?(?:ms|[smh]) ?)+\))?$/u;
 
 const reportDiagnostic = (line: string) => {
-  const text = line.replace(S6_STAMP, "");
+  const text = line.replace(STAMP, "");
   return text === "" || /^[\s[]/u.test(text) || text.startsWith(MARKER)
     ? null
     : text;
 };
 
-export const applyOf = (log: string, name: ServerName, run: RunId): Apply => {
+export const applyOf = (log: string): Apply => {
   let apply: Apply = { _tag: "None" };
   let pendingReport = false;
   let diagnostic: string | null = null;
   let firstResourceFailure: string | null = null;
-  for (const line of Option.getOrElse(runLines(log, name, run), () => [])) {
+  for (const line of log.split("\n")) {
     if (pendingReport) {
       diagnostic = reportDiagnostic(line);
       pendingReport = false;

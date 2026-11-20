@@ -11,11 +11,11 @@
 EXTENDS Naturals, Sequences
 
 CONSTANTS
-  StaleRun,          \* a dead earlier run left its record and a failed apply in the log
+  StaleRun,          \* a dead earlier run left its record and a failed apply in its own log
   MaxReloads,        \* file changes alchemy reloads on (`Reloading stack:`)
   ForeignBinds,      \* another process may take the published port
   RunnerCanCrash,    \* the runner may die (SIGKILL, OOM) and orphan the command
-  BindWaitsForBanner \* assumption A1: the banner reaches log/current before the sidecar binds
+  BindWaitsForBanner \* assumption A1: the banner reaches the run's log before the sidecar binds
 
 Applies == {"none", "applying", "done", "failed"}
 
@@ -28,8 +28,8 @@ VARIABLES
   sidecar,   \* "none" | "listening" | "gone": alchemy's sidecar, its own process group
   foreign,   \* a process outside the server listens on the port
   \* the log
-  pipe,      \* apply lines printed, still in the pipe to s6-log
-  logged,    \* applyOf(log, name, run) for the new run: the last apply line in log/current
+  pipe,
+  logged,
   \* the runner (`rigging server run`)
   runner,    \* "unborn" | "booting" | "recorded" | "removed" | "dead"
   record,    \* record.json: "none" | "stale" | "new"
@@ -65,6 +65,7 @@ ListenerOf(sidecarListens, foreignListens, cmdAlive) ==
 ApplyAfter(apply, line) == line
 
 RunnerUp == runner \in {"booting", "recorded", "removed"}
+PumpUp == RunnerUp
 Good == cmd = "alive" /\ RunnerUp /\ sidecar = "listening" /\ truth = "done"
 
 Ghost ==
@@ -193,7 +194,6 @@ StartTimesOut ==
 ---------------------------------------------------------------------------
 (* the runner: src/core/server/server.ts `run`                            *)
 
-\* removeFiles, start marker, spawn the command and s6-log
 RunnerSpawnsCommand ==
   /\ runner = "booting" /\ cmd = "unborn"
   /\ cmd' = "alive"
@@ -298,10 +298,8 @@ SidecarNoticesParentGone ==
   /\ UNCHANGED <<cmd, endpoint, truth, reloads, foreign, pipe, logged,
                  runVars, startVars>> /\ Ghost
 
-\* s6-log writes the next line to log/current; applyOf of this run's lines is
-\* the last apply line among them
 LogWritesLine ==
-  /\ pipe # <<>>
+  /\ PumpUp /\ pipe # <<>>
   /\ logged' = ApplyAfter(logged, Head(pipe)) /\ pipe' = Tail(pipe)
   /\ UNCHANGED <<cmd, endpoint, truth, reloads, sidecar, foreign,
                  runVars, startVars>> /\ Ghost

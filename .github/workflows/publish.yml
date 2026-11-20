@@ -52,8 +52,6 @@ jobs:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
-      # rigging server rotates its logs with s6-log.
-      - run: sudo apt-get update && sudo apt-get install -y s6
       - run: pnpm install --frozen-lockfile
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - run: npm install -g npm@latest

@@ -1,16 +1,22 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:os";
 
+import * as ByteSize from "effect/ByteSize";
 import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import {
@@ -22,13 +28,17 @@ import {
   files,
   listenerOf,
   type PortListener,
+  RUN_LOG_ROLL_AT,
+  runFilesToPrune,
   RunId,
+  runLog,
   runOutput,
   type ServerName,
   type ServerRecord,
   ServerRecordJson,
   SERVERS_DIRECTORY,
   type ServerState,
+  stamped,
   startMarker,
   stateOf,
 } from "./domain.ts";
@@ -44,19 +54,6 @@ const ANSWER_TIMEOUT = Duration.seconds(10);
  * runner's cleanup inside the 5 seconds `stopRecorded` allows after SIGKILL.
  */
 const MARKED_STOP_TIMEOUT = Duration.seconds(2);
-
-/** `s6-log`'s rotation: 20 files of 5 MiB, 100 MiB in all, a timestamp on each line. */
-const s6LogArgs = (directory: string) => [
-  "-b",
-  "-l",
-  "65536",
-  "n20",
-  "s5242880",
-  "S104857600",
-  "T",
-  directory,
-  "1",
-];
 
 export class ServerExitedError extends Schema.TaggedError<ServerExitedError>()(
   "ServerExitedError",
@@ -119,14 +116,68 @@ export class StopTimeoutError extends Schema.TaggedError<StopTimeoutError>()(
   }
 }
 
-export class LoggerExitedError extends Schema.TaggedError<LoggerExitedError>()(
-  "LoggerExitedError",
-  { name: Schema.String, code: Schema.Int },
+export class NoRunLogError extends Schema.TaggedError<NoRunLogError>()(
+  "NoRunLogError",
+  { name: Schema.String },
 ) {
   override get message() {
-    return `s6-log exited ${String(this.code)} while the ${this.name} server ran; the server was stopped`;
+    return `no run of the ${this.name} server has logged yet`;
   }
 }
+
+export class LogWriteError extends Schema.TaggedError<LogWriteError>()(
+  "LogWriteError",
+  { name: Schema.String, path: Schema.String, cause: Schema.Defect() },
+) {
+  override get message() {
+    return `could not write ${this.path}, the ${this.name} server's log`;
+  }
+}
+
+export const openRunLog = Effect.fn("Server.openRunLog")(function* (
+  path: string,
+  options: { readonly name: ServerName; readonly cap: ByteSize.ByteSize },
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const scope = yield* Scope.Scope;
+  const failed = (cause: unknown) =>
+    new LogWriteError({ name: options.name, path, cause });
+  const openFile = Effect.gen(function* () {
+    const handle = yield* Scope.fork(scope);
+    const file = yield* fs
+      .open(path, { flag: "a" })
+      .pipe(Scope.provide(handle));
+    return { handle, file, size: (yield* file.stat).size };
+  });
+  const current = yield* Ref.make(
+    yield* openFile.pipe(Effect.mapError(failed)),
+  );
+  const encoder = new TextEncoder();
+  const writing = yield* Semaphore.make(1);
+  const write = (lines: readonly string[]) =>
+    Effect.gen(function* () {
+      const at = yield* DateTime.now;
+      const chunk = encoder.encode(
+        lines.map((line) => `${stamped(at, line)}\n`).join(""),
+      );
+      const length = ByteSize.bytes(chunk.length);
+      let open = yield* Ref.get(current);
+      if (
+        ByteSize.isGreaterThan(open.size, ByteSize.zero) &&
+        ByteSize.isGreaterThan(ByteSize.sum(open.size, length), options.cap)
+      ) {
+        yield* fs.rename(path, `${path}.1`);
+        yield* Scope.close(open.handle, Exit.void);
+        open = yield* openFile;
+      }
+      yield* open.file.writeAll(chunk);
+      yield* Ref.set(current, {
+        ...open,
+        size: ByteSize.sum(open.size, length),
+      });
+    }).pipe(Effect.mapError(failed), Semaphore.withPermit(writing));
+  return { write };
+});
 
 const at = Effect.fn("Server.at")(function* (root: string, relative: string) {
   const path = yield* Path.Path;
@@ -326,23 +377,61 @@ const waitUntil = <E, R>(
     return true;
   });
 
-const logLine = Effect.fn("Server.logLine")(function* (
+const runNames = Effect.fn("Server.runNames")(function* (
   root: string,
   name: ServerName,
-  line: string,
 ) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  yield* spawner
-    .exitCode(
-      ChildProcess.make("s6-log", s6LogArgs(files(name).logDirectory), {
-        cwd: root,
-        stdin: { stream: Stream.make(new TextEncoder().encode(`${line}\n`)) },
-        stdout: "ignore",
-        stderr: "inherit",
-      }),
-    )
-    .pipe(Effect.ignore);
+  const fs = yield* FileSystem.FileSystem;
+  return yield* fs
+    .readDirectory(yield* at(root, files(name).runs))
+    .pipe(Effect.orElseSucceed((): string[] => []));
 });
+
+const newestRunLog = Effect.fn("Server.newestRunLog")(function* (
+  root: string,
+  name: ServerName,
+) {
+  const newest = (yield* runNames(root, name))
+    .filter((file) => file.endsWith(".log"))
+    .toSorted()
+    .at(-1);
+  return Option.map(
+    Option.fromNullishOr(newest),
+    (file) => `${files(name).runs}/${file}`,
+  );
+});
+
+const recordedOrNewestRunLog = (
+  root: string,
+  name: ServerName,
+  record: Option.Option<ServerRecord>,
+) =>
+  Option.match(record, {
+    onSome: (found) => Effect.succeed(Option.some(runLog(found))),
+    onNone: () => newestRunLog(root, name),
+  });
+
+const removePrunable = Effect.fn("Server.removePrunable")(function* (
+  directory: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const sized = yield* Effect.forEach(
+    yield* fs.readDirectory(directory),
+    (name) =>
+      fs
+        .stat(path.join(directory, name))
+        .pipe(Effect.map((info) => ({ name, size: info.size }))),
+  );
+  yield* Effect.forEach(
+    runFilesToPrune(sized),
+    (name) => fs.remove(path.join(directory, name), { force: true }),
+    { discard: true },
+  );
+});
+
+const lines = <E>(stream: Stream.Stream<Uint8Array, E>) =>
+  stream.pipe(Stream.decodeText(), Stream.splitLines);
 
 /** Node's message for a command a signal ended, which Effect's `exitCode` fails with. */
 const SIGNALED = /receipt of signal: '(?<signal>SIG[A-Z0-9]+)'/u;
@@ -371,17 +460,24 @@ export const run = Effect.fn("Server.run")(function* (
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fs = yield* FileSystem.FileSystem;
-  // s6-log makes its own directory, not that directory's parent.
-  yield* fs.makeDirectory(yield* at(root, files(name).directory), {
-    recursive: true,
-  });
+  const runs = yield* at(root, files(name).runs);
+  yield* fs.makeDirectory(runs, { recursive: true });
   yield* fs.writeFileString(
     yield* at(root, `${SERVERS_DIRECTORY}/.gitignore`),
     "*\n",
   );
+  yield* fs.remove(yield* at(root, files(name).legacyLog), {
+    recursive: true,
+    force: true,
+  });
   yield* removeFiles(root, name);
+  yield* removePrunable(runs);
   const startedAt = DateTime.formatIso(yield* DateTime.now);
-  yield* logLine(root, name, startMarker(name, runId, startedAt, note));
+  const log = yield* openRunLog(
+    yield* at(root, runLog({ name, startedAt, run: runId })),
+    { name, cap: RUN_LOG_ROLL_AT },
+  );
+  yield* log.write([startMarker(name, runId, startedAt, note)]);
 
   const [program, ...args] = command;
   const child = yield* spawner.spawn(
@@ -404,15 +500,10 @@ export const run = Effect.fn("Server.run")(function* (
     }),
   );
   const group = Number(child.pid);
-  const logger = yield* spawner.spawn(
-    ChildProcess.make("s6-log", s6LogArgs(files(name).logDirectory), {
-      cwd: root,
-      detached: true,
-      stdin: { stream: Stream.merge(child.stdout, child.stderr) },
-      stdout: "inherit",
-      stderr: "inherit",
-    }),
-  );
+  const pumping = yield* Stream.merge(
+    lines(child.stdout),
+    lines(child.stderr),
+  ).pipe(Stream.runForEachArray(log.write), Effect.forkScoped);
   yield* writeAtomic(
     yield* at(root, files(name).record),
     Schema.encodeSync(ServerRecordJson)({
@@ -438,21 +529,20 @@ export const run = Effect.fn("Server.run")(function* (
   });
   const finish = (ending: Ending) =>
     endMarked(runId).pipe(
-      Effect.andThen(logger.exitCode),
+      Effect.andThen(Fiber.join(pumping)),
       Effect.ignore,
-      Effect.andThen(logLine(root, name, exitMarker(name, runId, ending))),
+      Effect.andThen(
+        log.write([exitMarker(name, runId, ending)]).pipe(Effect.ignore),
+      ),
       Effect.andThen(removeFiles(root, name)),
     );
 
   const ending = yield* Effect.raceFirst(
     endingOf(child),
-    logger.exitCode.pipe(
-      Effect.flatMap((loggerCode) =>
-        stopGroup.pipe(
-          Effect.andThen(
-            new LoggerExitedError({ name, code: Number(loggerCode) }),
-          ),
-        ),
+    Fiber.join(pumping).pipe(
+      Effect.andThen(Effect.never),
+      Effect.catch((error) =>
+        stopGroup.pipe(Effect.andThen(Effect.fail(error))),
       ),
     ),
   ).pipe(
@@ -464,7 +554,7 @@ export const run = Effect.fn("Server.run")(function* (
     ),
     Effect.tapError(() => removeFiles(root, name)),
   );
-  // The command's children can outlive it and hold the logger's pipe open.
+  // The command's children can outlive it and hold its pipes open.
   if (yield* groupAlive(group)) yield* stopGroup;
   yield* finish(ending);
   return ending._tag === "Exited"
@@ -486,7 +576,7 @@ export interface StatusJson {
   readonly url: string | null;
   readonly failure: string | null;
   readonly diagnostic: string | null;
-  readonly log: string;
+  readonly log: string | null;
 }
 
 const sight = Effect.fn("Server.sight")(function* (
@@ -501,9 +591,9 @@ const sight = Effect.fn("Server.sight")(function* (
       : { _tag: "Free" };
   const apply: Apply = Option.isNone(record)
     ? { _tag: "None" }
-    : Option.match(yield* readFile(yield* at(root, files(name).log)), {
+    : Option.match(yield* readFile(yield* at(root, runLog(record.value))), {
         onNone: () => ({ _tag: "None" }),
-        onSome: (log) => applyOf(log, name, record.value.run),
+        onSome: applyOf,
       });
   const seen = Option.isNone(record)
     ? { runner: false, group: false, answering: false, apply }
@@ -534,7 +624,7 @@ const sight = Effect.fn("Server.sight")(function* (
     url: published?.url ?? null,
     failure: failed?.failure ?? null,
     diagnostic: failed?.diagnostic ?? null,
-    log: files(name).log,
+    log: Option.getOrNull(yield* recordedOrNewestRunLog(root, name, record)),
   };
   return { status, listener };
 });
@@ -547,13 +637,17 @@ const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
   name: ServerName,
   runId: RunId,
 ) {
-  const log = yield* readFile(yield* at(root, files(name).log));
+  const file = (yield* runNames(root, name)).find((found) =>
+    found.endsWith(`-${runId}.log`),
+  );
+  if (file === undefined)
+    return `(run ${runId} wrote nothing to ${files(name).runs})`;
+  const log = `${files(name).runs}/${file}`;
   return Option.match(
-    Option.flatMap(log, (text) => runOutput(text, name, runId)),
+    Option.flatMap(yield* readFile(yield* at(root, log)), runOutput),
     {
-      onNone: () => `(run ${runId} wrote nothing to ${files(name).log})`,
-      onSome: (output) =>
-        `--- ${files(name).log}, run ${runId} ---\n${output}\n---`,
+      onNone: () => `(run ${runId} wrote nothing to ${log})`,
+      onSome: (output) => `--- ${log} ---\n${output}\n---`,
     },
   );
 });
@@ -574,7 +668,7 @@ const waitAnswering = Effect.fn("Server.waitAnswering")(function* (
         run: runId,
         failure: now.failure,
         diagnostic: now.diagnostic,
-        log: now.log,
+        log: now.log ?? files(name).runs,
       });
     if (listener._tag === "Taken" && now.run === runId && now.port !== null) {
       const holders = yield* Effect.forEach(listener.pids, holderOf);
@@ -724,12 +818,22 @@ export const logs = Effect.fn("Server.logs")(function* (
   follow: boolean,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const log = yield* at(root, files(name).log);
-  // s6-log rotates by renaming `current`; -F reopens it by name.
+  const log = yield* recordedOrNewestRunLog(
+    root,
+    name,
+    yield* readRecord(root, name),
+  );
+  if (Option.isNone(log)) return yield* new NoRunLogError({ name });
+  // A run's log rolls by renaming it; -F reopens it by name.
   yield* spawner.exitCode(
     ChildProcess.make(
       "tail",
-      [...(follow ? ["-F"] : []), "-n", String(lines), log],
+      [
+        ...(follow ? ["-F"] : []),
+        "-n",
+        String(lines),
+        yield* at(root, log.value),
+      ],
       { stdin: "ignore", stdout: "inherit", stderr: "inherit" },
     ),
   );

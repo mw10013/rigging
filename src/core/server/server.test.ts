@@ -3,15 +3,21 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import * as ByteSize from "effect/ByteSize";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   applyOf,
   listenerOf,
+  runFilesToPrune,
   RunId,
+  runLogName,
   runOutput,
+  RUNS_KEPT,
   ServerName,
+  stamped,
   stateOf,
 } from "./domain.ts";
 
@@ -88,11 +94,18 @@ const serverIn = (cwd: string, ...args: string[]) =>
 
 const server = (...args: string[]) => serverIn(checkout, ...args);
 
-const log = () =>
+const ISO = String.raw`\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z`;
+
+const runFilePattern = (run: string) =>
+  new RegExp(String.raw`^\.rigging/servers/dev/runs/${ISO}-${run}\.log$`, "u");
+
+const logIn = (cwd: string) =>
   fs.readFileSync(
-    path.join(checkout, ".rigging/servers/dev/log/current"),
+    path.join(cwd, serverIn(cwd, "status", "dev").json.log),
     "utf8",
   );
+
+const log = () => logIn(checkout);
 
 const alive = (pid: number) => {
   try {
@@ -141,7 +154,8 @@ describe("rigging server", () => {
     expect(now.json.state).toBe("running");
     expect(now.json.failure).toBeNull();
     expect(now.json.diagnostic).toBeNull();
-    expect(started.json.log).toBe(".rigging/servers/dev/log/current");
+    expect(started.json.log).toMatch(runFilePattern(started.json.run));
+    expect(now.json.log).toBe(started.json.log);
     expect(
       execFileSync("git", ["status", "--porcelain"], {
         cwd: checkout,
@@ -154,9 +168,41 @@ describe("rigging server", () => {
     const after = server("status", "dev");
     expect(after.code).toBe(3);
     expect(after.json.state).toBe("stopped");
-    expect(log()).toContain("a stderr line");
-    expect(log()).toContain("got SIGTERM");
-    expect(log()).toContain(`==== dev exit run=${started.json.run} code=0`);
+    expect(after.json.log).toBe(started.json.log);
+    const lines = log().split("\n").slice(0, -1);
+    const stamp = new RegExp(`^${ISO} `, "u");
+    expect(lines[0]).toMatch(
+      new RegExp(`^${ISO} ==== dev start ${ISO} run=${started.json.run}$`, "u"),
+    );
+    for (const text of ["listening on ", "a stderr line", "got SIGTERM"])
+      expect(lines.find((line) => line.includes(text))).toMatch(stamp);
+    expect(lines.at(-1)).toMatch(
+      new RegExp(`^${ISO} ==== dev exit run=${started.json.run} code=0$`, "u"),
+    );
+  }, 60_000);
+
+  it("writes each run to its own file, which holds no earlier run's lines", () => {
+    const failed = server(
+      "start",
+      "dev",
+      "--",
+      "node",
+      "server.mjs",
+      "apply-failed",
+    );
+    expect(failed.json.error._tag).toBe("ServerDegradedError");
+    const first = server("status", "dev").json;
+    expect(server("stop", "dev").code).toBe(0);
+
+    const second = server("start", "dev", "--", "node", "server.mjs");
+    expect(second.json.state).toBe("running");
+    expect(second.json.log).not.toBe(first.log);
+    expect(second.json.log).toMatch(runFilePattern(second.json.run));
+    expect(log()).not.toContain(first.run);
+    expect(log()).not.toContain("apply failed");
+    expect(fs.readFileSync(path.join(checkout, first.log), "utf8")).toContain(
+      `==== dev exit run=${first.run} `,
+    );
   }, 60_000);
 
   it("keeps a monorepo app's servers in that app's folder", () => {
@@ -172,18 +218,15 @@ describe("rigging server", () => {
 
     const started = serverIn(inSrc, "start", "dev", "--", "node", "server.mjs");
     expect(started.code).toBe(0);
-    expect(started.json.log).toBe(".rigging/servers/dev/log/current");
+    expect(started.json.log).toMatch(runFilePattern(started.json.run));
     expect(serverIn(app, "status", "dev").json.state).toBe("running");
     expect(server("status", "dev").json.state).toBe("stopped");
     expect(fs.existsSync(path.join(checkout, ".rigging"))).toBe(false);
 
     expect(serverIn(inSrc, "stop", "dev").code).toBe(0);
-    expect(
-      fs.readFileSync(
-        path.join(app, ".rigging/servers/dev/log/current"),
-        "utf8",
-      ),
-    ).toContain(`==== dev exit run=${started.json.run} code=0`);
+    expect(logIn(app)).toContain(
+      `==== dev exit run=${started.json.run} code=0`,
+    );
   }, 60_000);
 
   it("reports a server that logged a failed apply as degraded, and keeps it running", () => {
@@ -198,7 +241,7 @@ describe("rigging server", () => {
     const now = server("status", "dev");
     const message = `the dev server logged a failure (run ${now.json.run}); it is still running
 RewrittenMigrationHistoryError: changed 0001_init.sql
-see .rigging/servers/dev/log/current`;
+see ${now.json.log}`;
     expect(started.code).toBe(1);
     expect(started.json.error).toEqual({
       _tag: "ServerDegradedError",
@@ -409,82 +452,146 @@ see .rigging/servers/dev/log/current`;
   }, 60_000);
 });
 
-describe("runOutput", () => {
-  const name = ServerName.make("dev");
-  const run = RunId.make("0123abcd");
-  const log = [
-    "t0  ==== dev start 2026 run=ffffffff",
-    "t1  old run",
-    "t2  ==== dev exit run=ffffffff code=0",
-    "t3  ==== dev start 2026 run=0123abcd store=x",
-    "t4  line one",
-    "t5  ==== dev exit run=0123abcd code=1",
-    "t6  ==== dev start 2026 run=99999999",
-  ].join("\n");
+describe("run logs", () => {
+  const at = DateTime.makeUnsafe("2026-11-15T08:24:53.894Z");
 
-  it("keeps one run's lines through its exit marker", () => {
-    expect(runOutput(log, name, run)).toEqual(
-      Option.some("t4  line one\nt5  ==== dev exit run=0123abcd code=1"),
+  it("stamps a line with its UTC instant and leaves an empty line empty", () => {
+    expect(stamped(at, "[03:25:00.159] INFO: Dev · dev-mw")).toBe(
+      "2026-11-15T08:24:53.894Z [03:25:00.159] INFO: Dev · dev-mw",
+    );
+    expect(stamped(at, "")).toBe("");
+  });
+
+  it("names a run's file so the names sort by start time", () => {
+    const names = [
+      runLogName("2026-11-15T08:24:53.894Z", RunId.make("ffffffff")),
+      runLogName("2026-11-15T10:00:00.000Z", RunId.make("00000000")),
+      runLogName("2026-11-14T23:59:59.999Z", RunId.make("aaaaaaaa")),
+    ];
+    expect(names.toSorted()).toEqual([names[2], names[0], names[1]]);
+    expect(names[0]).toBe("2026-11-15T08:24:53.894Z-ffffffff.log");
+  });
+
+  const runFile = (index: number) =>
+    runLogName(
+      `2026-11-15T08:${String(index).padStart(2, "0")}:00.000Z`,
+      RunId.make("0123abcd"),
+    );
+  const small = ByteSize.kibibytes(1);
+
+  it("expires the oldest runs past the count, leaving room for the new one", () => {
+    const files = Array.from({ length: RUNS_KEPT + 2 }, (_, index) => ({
+      name: runFile(index),
+      size: small,
+    }));
+    expect(runFilesToPrune(files).toSorted()).toEqual([
+      runFile(0),
+      runFile(1),
+      runFile(2),
+    ]);
+  });
+
+  it("counts a run's rolled file with it", () => {
+    const files = Array.from({ length: RUNS_KEPT }, (_, index) => ({
+      name: runFile(index),
+      size: small,
+    }));
+    const rolled = [...files, { name: `${runFile(5)}.1`, size: small }];
+    expect(runFilesToPrune(rolled)).toEqual([runFile(0)]);
+    expect(
+      runFilesToPrune([
+        ...rolled,
+        { name: `${runFile(0)}.1`, size: small },
+      ]).toSorted(),
+    ).toEqual([runFile(0), `${runFile(0)}.1`]);
+  });
+
+  it("expires the older runs once the kept runs pass the bytes", () => {
+    const files = [
+      { name: runFile(3), size: ByteSize.mebibytes(40) },
+      { name: `${runFile(3)}.1`, size: ByteSize.mebibytes(50) },
+      { name: runFile(2), size: ByteSize.mebibytes(5) },
+      { name: runFile(1), size: ByteSize.mebibytes(10) },
+      { name: runFile(0), size: small },
+    ];
+    expect(runFilesToPrune(files).toSorted()).toEqual([runFile(0), runFile(1)]);
+  });
+
+  it("keeps the newest run though it alone passes the bytes", () => {
+    const files = [
+      { name: runFile(1), size: ByteSize.mebibytes(50) },
+      { name: `${runFile(1)}.1`, size: ByteSize.mebibytes(60) },
+      { name: runFile(0), size: small },
+    ];
+    expect(runFilesToPrune(files)).toEqual([runFile(0)]);
+  });
+
+  it("leaves files that are not run logs alone", () => {
+    expect(
+      runFilesToPrune([{ name: "notes.txt", size: ByteSize.gibibytes(1) }]),
+    ).toEqual([]);
+  });
+});
+
+describe("runOutput", () => {
+  const STAMP = "2026-11-15T08:24:53.894Z ";
+  const START = `${STAMP}==== dev start 2026-11-15T08:24:53.781Z run=0123abcd store=x`;
+
+  it("keeps the run's lines through its exit marker, after its start marker", () => {
+    expect(
+      runOutput(
+        [
+          START,
+          `${STAMP}line one`,
+          "",
+          `${STAMP}==== dev exit run=0123abcd code=1`,
+          "",
+        ].join("\n"),
+      ),
+    ).toEqual(
+      Option.some(
+        `${STAMP}line one\n${STAMP}==== dev exit run=0123abcd code=1`,
+      ),
     );
   });
 
-  it("is none for a run the log does not hold", () => {
-    expect(runOutput(log, name, RunId.make("deadbeef"))).toEqual(Option.none());
+  it("is none for a run that wrote only its start marker", () => {
+    expect(runOutput(`${START}\n`)).toEqual(Option.none());
   });
 });
 
 describe("applyOf", () => {
-  const name = ServerName.make("dev");
-  const run = RunId.make("0123abcd");
   const BANNER = "[04:17:39.887] INFO: Dev · dev-mw";
   const APPLY_FAILED =
     "[04:17:48.756] ERROR: alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.";
   const runLog = (...lines: string[]) =>
     [
-      "t0  ==== dev start 2026 run=ffffffff",
-      `t1  ${BANNER}`,
-      `t1  ${APPLY_FAILED}`,
-      "t2  ==== dev exit run=ffffffff code=0",
-      "t3  ==== dev start 2026 run=0123abcd",
-      ...lines.map((line) => `t4  ${line}`),
+      "2026-11-15T08:24:53.894Z ==== dev start 2026-11-15T08:24:53.781Z run=0123abcd",
+      ...lines.map((line) => `2026-11-15T08:24:54.000Z ${line}`),
     ].join("\n");
 
   it("reads a command that logs no apply as none, routine failures included", () => {
     expect(
-      applyOf(
-        runLog("1 test failed", "ERROR: fetch failed; retrying"),
-        name,
-        run,
-      ),
+      applyOf(runLog("1 test failed", "ERROR: fetch failed; retrying")),
     ).toEqual({ _tag: "None" });
   });
 
   it("reads an apply as in progress from the banner until its summary", () => {
     expect(
-      applyOf(
-        runLog(BANNER, "[Website] ready at http://localhost:1"),
-        name,
-        run,
-      ),
+      applyOf(runLog(BANNER, "[Website] ready at http://localhost:1")),
     ).toEqual({ _tag: "Applying" });
     expect(
-      applyOf(
-        runLog(BANNER, "[04:17:25.506] INFO: Done: 6 succeeded (10.0s)"),
-        name,
-        run,
-      ),
+      applyOf(runLog(BANNER, "[04:17:25.506] INFO: Done: 6 succeeded (10.0s)")),
     ).toEqual({ _tag: "Applied" });
   });
 
-  it("names the failure, from the summary on, and ignores an earlier run's", () => {
+  it("names the failure, from the summary on", () => {
     expect(
       applyOf(
         runLog(
           BANNER,
           "[04:17:48.756] INFO: Failed: 0 succeeded, 4 failed (3.2s)",
         ),
-        name,
-        run,
       ),
     ).toEqual({
       _tag: "Failed",
@@ -498,8 +605,6 @@ describe("applyOf", () => {
           "[04:17:48.756] INFO: Failed: 0 succeeded, 4 failed (3.2s)",
           APPLY_FAILED,
         ),
-        name,
-        run,
       ),
     ).toEqual({
       _tag: "Failed",
@@ -516,8 +621,6 @@ describe("applyOf", () => {
           BANNER,
           "[t] ERROR: alchemy dev: run failed; waiting for the next file change to retry.",
         ),
-        name,
-        run,
       ),
     ).toMatchObject({ _tag: "Failed" });
   });
@@ -529,15 +632,13 @@ describe("applyOf", () => {
           BANNER,
           "[t] ERROR: alchemy dev: apply was interrupted internally (a bug in a provider or the engine — please report it with the trace below); keeping dev alive so healthy resources keep serving.",
         ),
-        name,
-        run,
       ),
     ).toMatchObject({ _tag: "Failed" });
   });
 
   it("reopens the apply on a reload, which settles the failure before it", () => {
     const reloaded = "[t] INFO: Reloading stack: changed src/backend.ts";
-    expect(applyOf(runLog(BANNER, APPLY_FAILED, reloaded), name, run)).toEqual({
+    expect(applyOf(runLog(BANNER, APPLY_FAILED, reloaded))).toEqual({
       _tag: "Applying",
     });
     expect(
@@ -549,23 +650,19 @@ describe("applyOf", () => {
           BANNER,
           "[t] INFO: Done: 6 succeeded (1s)",
         ),
-        name,
-        run,
       ),
     ).toEqual({ _tag: "Applied" });
   });
 });
 
 describe("applyOf's diagnostic", () => {
-  const name = ServerName.make("dev");
-  const run = RunId.make("2765bcc1");
   const recorded = fs
     .readFileSync(
       path.join(import.meta.dirname, "fixtures/apply-failed.log"),
       "utf8",
     )
     .split("\n");
-  const STAMP = "2026-11-15 03:25:19.238405500  ";
+  const STAMP = "2026-11-15T08:25:19.238Z ";
   const START = `${STAMP}==== dev start 2026-11-15T08:24:53.781Z run=2765bcc1`;
   const FAILURE =
     "alchemy dev: apply failed; keeping dev alive so healthy resources keep serving.";
@@ -575,9 +672,8 @@ describe("applyOf's diagnostic", () => {
     0,
     recorded.findIndex((line) => line.includes("] INFO: Failed: ")) + 1,
   );
-  const applyOfLines = (lines: readonly string[]) =>
-    applyOf(lines.join("\n"), name, run);
-  const stamped = (...lines: string[]) =>
+  const applyOfLines = (lines: readonly string[]) => applyOf(lines.join("\n"));
+  const runOf = (...lines: string[]) =>
     applyOfLines([START, ...lines.map((line) => STAMP + line)]);
 
   it("names the cause alchemy reported after a failed apply, not the stack or the exit", () => {
@@ -646,7 +742,7 @@ describe("applyOf's diagnostic", () => {
 
   it("names the cause of a failure before any apply, in the shape alchemy's exec.ts logs it", () => {
     expect(
-      stamped(
+      runOf(
         "[t] INFO: Dev · dev-mw",
         "[t] ERROR: alchemy dev: run failed; waiting for the next file change to retry.",
         "SyntaxError: Unexpected token '}'",
@@ -662,7 +758,7 @@ describe("applyOf's diagnostic", () => {
 
   it("names no cause for an internally interrupted apply", () => {
     expect(
-      stamped(
+      runOf(
         "[t] INFO: Dev · dev-mw",
         "[t] ERROR: alchemy dev: apply was interrupted internally (a bug in a provider or the engine — please report it with the trace below); keeping dev alive so healthy resources keep serving.",
         "All fibers interrupted without error",
@@ -672,7 +768,7 @@ describe("applyOf's diagnostic", () => {
 
   it("names no cause when the report has none, and never alchemy's exit", () => {
     expect(
-      stamped(
+      runOf(
         "[t] INFO: Dev · dev-mw",
         "[t] INFO: Failed: 0 succeeded, 1 failed (1s)",
         `[t] ERROR: ${FAILURE}`,
@@ -683,7 +779,7 @@ describe("applyOf's diagnostic", () => {
       ),
     ).toEqual({ _tag: "Failed", failure: FAILURE, diagnostic: null });
     expect(
-      stamped(
+      runOf(
         "[t] INFO: Dev · dev-mw",
         `[t] ERROR: ${FAILURE}`,
         "==== dev exit run=2765bcc1 signal=SIGTERM",
@@ -695,14 +791,14 @@ describe("applyOf's diagnostic", () => {
     const sqlite =
       "[t] INFO: workerd/jsg/util.c++:410: error: e = workerd/util/sqlite.c++:1772: failed: SQLite failed; dbErrorMessage(err, db) = attempt to write a readonly database: SQLITE_READONLY";
     expect(
-      stamped(
+      runOf(
         "[t] INFO: Dev · dev-mw",
         sqlite,
         "[t] INFO: Done: 6 succeeded (1s)",
       ),
     ).toEqual({ _tag: "Applied" });
     expect(
-      stamped(
+      runOf(
         "[t] INFO: Dev · dev-mw",
         sqlite,
         "[t] INFO: Failed: 0 succeeded, 1 failed (1s)",
