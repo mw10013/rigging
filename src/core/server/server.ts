@@ -183,12 +183,12 @@ const processTable = output("ps", ["-A", "-o", "pid=,ppid="]).pipe(
 );
 
 const markedPids = (run: RunId, pids?: readonly number[]) =>
-  output("ps", [
-    "-E",
-    "-o",
-    "pid=,command=",
-    ...(pids === undefined ? ["-A"] : ["-p", pids.join(",")]),
-  ]).pipe(
+  output(
+    "ps",
+    pids === undefined
+      ? ["axe", "-o", "pid=,command="]
+      : ["e", "-o", "pid=,command=", "-p", pids.join(",")],
+  ).pipe(
     Effect.map((text) => {
       const marker = `RIGGING_RUN=${run}`;
       const marked = new Set<number>();
