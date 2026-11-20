@@ -10,8 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   applyOf,
-  expired,
   listenerOf,
+  runFilesToPrune,
   RunId,
   runLogName,
   runOutput,
@@ -484,7 +484,7 @@ describe("run logs", () => {
       name: runFile(index),
       size: small,
     }));
-    expect(expired(files).toSorted()).toEqual([
+    expect(runFilesToPrune(files).toSorted()).toEqual([
       runFile(0),
       runFile(1),
       runFile(2),
@@ -497,9 +497,12 @@ describe("run logs", () => {
       size: small,
     }));
     const rolled = [...files, { name: `${runFile(5)}.1`, size: small }];
-    expect(expired(rolled)).toEqual([runFile(0)]);
+    expect(runFilesToPrune(rolled)).toEqual([runFile(0)]);
     expect(
-      expired([...rolled, { name: `${runFile(0)}.1`, size: small }]).toSorted(),
+      runFilesToPrune([
+        ...rolled,
+        { name: `${runFile(0)}.1`, size: small },
+      ]).toSorted(),
     ).toEqual([runFile(0), `${runFile(0)}.1`]);
   });
 
@@ -511,7 +514,7 @@ describe("run logs", () => {
       { name: runFile(1), size: ByteSize.mebibytes(10) },
       { name: runFile(0), size: small },
     ];
-    expect(expired(files).toSorted()).toEqual([runFile(0), runFile(1)]);
+    expect(runFilesToPrune(files).toSorted()).toEqual([runFile(0), runFile(1)]);
   });
 
   it("keeps the newest run though it alone passes the bytes", () => {
@@ -520,12 +523,12 @@ describe("run logs", () => {
       { name: `${runFile(1)}.1`, size: ByteSize.mebibytes(60) },
       { name: runFile(0), size: small },
     ];
-    expect(expired(files)).toEqual([runFile(0)]);
+    expect(runFilesToPrune(files)).toEqual([runFile(0)]);
   });
 
   it("leaves files that are not run logs alone", () => {
     expect(
-      expired([{ name: "notes.txt", size: ByteSize.gibibytes(1) }]),
+      runFilesToPrune([{ name: "notes.txt", size: ByteSize.gibibytes(1) }]),
     ).toEqual([]);
   });
 });

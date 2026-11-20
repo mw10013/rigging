@@ -42,14 +42,13 @@ export const files = (name: ServerName) => ({
   record: `${SERVERS_DIRECTORY}/${name}/record.json`,
   endpoint: `${SERVERS_DIRECTORY}/${name}/endpoint.json`,
   runs: `${SERVERS_DIRECTORY}/${name}/runs`,
+  legacyLog: `${SERVERS_DIRECTORY}/${name}/log`,
 });
 
-/** A run's log rolls to `<file>.1` past this size, so one run keeps at most twice it. */
-export const RUN_LOG_CAP = ByteSize.mebibytes(50);
+export const RUN_LOG_ROLL_AT = ByteSize.mebibytes(50);
 export const RUNS_KEPT = 20;
 export const RUNS_BYTES = ByteSize.mebibytes(100);
 
-/** ISO instants sort as text, so the names sort by start time. */
 export const runLogName = (startedAt: string, run: RunId) =>
   `${startedAt}-${run}.log`;
 
@@ -62,11 +61,7 @@ export const stamped = (at: DateTime.Utc, line: string) =>
 
 const RUN_FILE = /^(?<log>.+\.log)(?:\.1)?$/u;
 
-/**
- * The run files to delete before a new run starts, so that it and the runs kept number at most
- * `RUNS_KEPT` and the kept runs hold at most `RUNS_BYTES`. The newest run is kept whatever its size.
- */
-export const expired = (
+export const runFilesToPrune = (
   files: readonly { readonly name: string; readonly size: ByteSize.ByteSize }[],
 ): readonly string[] => {
   const runs = new Map<

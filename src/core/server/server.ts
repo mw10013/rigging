@@ -16,6 +16,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import {
@@ -24,11 +25,11 @@ import {
   type Ending,
   EndpointJson,
   exitMarker,
-  expired,
   files,
   listenerOf,
   type PortListener,
-  RUN_LOG_CAP,
+  RUN_LOG_ROLL_AT,
+  runFilesToPrune,
   RunId,
   runLog,
   runOutput,
@@ -133,11 +134,6 @@ export class LogWriteError extends Schema.TaggedError<LogWriteError>()(
   }
 }
 
-/**
- * Appends lines to a run's log, each stamped with the instant of its write, and rolls the file to
- * `<path>.1` first when the write would pass `cap`. Writes never overlap: the pump writes, and the
- * exit marker follows once the pump has drained.
- */
 export const openRunLog = Effect.fn("Server.openRunLog")(function* (
   path: string,
   options: { readonly name: ServerName; readonly cap: ByteSize.ByteSize },
@@ -157,6 +153,7 @@ export const openRunLog = Effect.fn("Server.openRunLog")(function* (
     yield* openFile.pipe(Effect.mapError(failed)),
   );
   const encoder = new TextEncoder();
+  const writing = yield* Semaphore.make(1);
   const write = (lines: readonly string[]) =>
     Effect.gen(function* () {
       const at = yield* DateTime.now;
@@ -178,7 +175,7 @@ export const openRunLog = Effect.fn("Server.openRunLog")(function* (
         ...open,
         size: ByteSize.sum(open.size, length),
       });
-    }).pipe(Effect.mapError(failed));
+    }).pipe(Effect.mapError(failed), Semaphore.withPermit(writing));
   return { write };
 });
 
@@ -390,13 +387,10 @@ const runNames = Effect.fn("Server.runNames")(function* (
     .pipe(Effect.orElseSucceed((): string[] => []));
 });
 
-/** The record's run file; with no record, the newest run's. */
-const logOf = Effect.fn("Server.logOf")(function* (
+const newestRunLog = Effect.fn("Server.newestRunLog")(function* (
   root: string,
   name: ServerName,
-  record: Option.Option<ServerRecord>,
 ) {
-  if (Option.isSome(record)) return Option.some(runLog(record.value));
   const newest = (yield* runNames(root, name))
     .filter((file) => file.endsWith(".log"))
     .toSorted()
@@ -407,7 +401,17 @@ const logOf = Effect.fn("Server.logOf")(function* (
   );
 });
 
-const removeExpired = Effect.fn("Server.removeExpired")(function* (
+const recordedOrNewestRunLog = (
+  root: string,
+  name: ServerName,
+  record: Option.Option<ServerRecord>,
+) =>
+  Option.match(record, {
+    onSome: (found) => Effect.succeed(Option.some(runLog(found))),
+    onNone: () => newestRunLog(root, name),
+  });
+
+const removePrunable = Effect.fn("Server.removePrunable")(function* (
   directory: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -420,7 +424,7 @@ const removeExpired = Effect.fn("Server.removeExpired")(function* (
         .pipe(Effect.map((info) => ({ name, size: info.size }))),
   );
   yield* Effect.forEach(
-    expired(sized),
+    runFilesToPrune(sized),
     (name) => fs.remove(path.join(directory, name), { force: true }),
     { discard: true },
   );
@@ -462,17 +466,16 @@ export const run = Effect.fn("Server.run")(function* (
     yield* at(root, `${SERVERS_DIRECTORY}/.gitignore`),
     "*\n",
   );
-  // Earlier versions kept every run in one log/current; reading it now fails instead of showing a stale run.
-  yield* fs.remove(yield* at(root, `${files(name).directory}/log`), {
+  yield* fs.remove(yield* at(root, files(name).legacyLog), {
     recursive: true,
     force: true,
   });
   yield* removeFiles(root, name);
-  yield* removeExpired(runs);
+  yield* removePrunable(runs);
   const startedAt = DateTime.formatIso(yield* DateTime.now);
   const log = yield* openRunLog(
     yield* at(root, runLog({ name, startedAt, run: runId })),
-    { name, cap: RUN_LOG_CAP },
+    { name, cap: RUN_LOG_ROLL_AT },
   );
   yield* log.write([startMarker(name, runId, startedAt, note)]);
 
@@ -497,7 +500,6 @@ export const run = Effect.fn("Server.run")(function* (
     }),
   );
   const group = Number(child.pid);
-  // Split before merging, so a stderr chunk never lands inside a stdout line.
   const pumping = yield* Stream.merge(
     lines(child.stdout),
     lines(child.stderr),
@@ -525,7 +527,6 @@ export const run = Effect.fn("Server.run")(function* (
     )
       yield* signal(-group, "SIGKILL");
   });
-  // The pump ends once every holder of the command's pipes has exited, so the exit marker is last.
   const finish = (ending: Ending) =>
     endMarked(runId).pipe(
       Effect.andThen(Fiber.join(pumping)),
@@ -623,7 +624,7 @@ const sight = Effect.fn("Server.sight")(function* (
     url: published?.url ?? null,
     failure: failed?.failure ?? null,
     diagnostic: failed?.diagnostic ?? null,
-    log: Option.getOrNull(yield* logOf(root, name, record)),
+    log: Option.getOrNull(yield* recordedOrNewestRunLog(root, name, record)),
   };
   return { status, listener };
 });
@@ -817,7 +818,11 @@ export const logs = Effect.fn("Server.logs")(function* (
   follow: boolean,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const log = yield* logOf(root, name, yield* readRecord(root, name));
+  const log = yield* recordedOrNewestRunLog(
+    root,
+    name,
+    yield* readRecord(root, name),
+  );
   if (Option.isNone(log)) return yield* new NoRunLogError({ name });
   // A run's log rolls by renaming it; -F reopens it by name.
   yield* spawner.exitCode(

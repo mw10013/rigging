@@ -28,8 +28,8 @@ VARIABLES
   sidecar,   \* "none" | "listening" | "gone": alchemy's sidecar, its own process group
   foreign,   \* a process outside the server listens on the port
   \* the log
-  pipe,      \* apply lines printed, still in the pipe to the runner
-  logged,    \* applyOf of the new run's log file: the last apply line in it
+  pipe,
+  logged,
   \* the runner (`rigging server run`)
   runner,    \* "unborn" | "booting" | "recorded" | "removed" | "dead"
   record,    \* record.json: "none" | "stale" | "new"
@@ -65,6 +65,7 @@ ListenerOf(sidecarListens, foreignListens, cmdAlive) ==
 ApplyAfter(apply, line) == line
 
 RunnerUp == runner \in {"booting", "recorded", "removed"}
+PumpUp == RunnerUp
 Good == cmd = "alive" /\ RunnerUp /\ sidecar = "listening" /\ truth = "done"
 
 Ghost ==
@@ -193,7 +194,6 @@ StartTimesOut ==
 ---------------------------------------------------------------------------
 (* the runner: src/core/server/server.ts `run`                            *)
 
-\* removeFiles, start marker, spawn the command and fork the pump into the run's log
 RunnerSpawnsCommand ==
   /\ runner = "booting" /\ cmd = "unborn"
   /\ cmd' = "alive"
@@ -298,11 +298,8 @@ SidecarNoticesParentGone ==
   /\ UNCHANGED <<cmd, endpoint, truth, reloads, foreign, pipe, logged,
                  runVars, startVars>> /\ Ghost
 
-\* The runner's pump writes the next line to the run's log; applyOf of the
-\* file is the last apply line in it. The pump lives in the runner, so lines
-\* still in the pipe when the runner crashes are never written.
 LogWritesLine ==
-  /\ RunnerUp /\ pipe # <<>>
+  /\ PumpUp /\ pipe # <<>>
   /\ logged' = ApplyAfter(logged, Head(pipe)) /\ pipe' = Tail(pipe)
   /\ UNCHANGED <<cmd, endpoint, truth, reloads, sidecar, foreign,
                  runVars, startVars>> /\ Ghost

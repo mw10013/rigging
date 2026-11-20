@@ -24,10 +24,10 @@ rigging logs show|follow|wait <stage>         # Cloudflare: a deployed stage's W
 ```
 
 `rigging server` works on the nearest folder upward that holds a `package.json`, so each
-checkout, and each app in a monorepo, has its own servers. Each run writes its output to its
-own file, `.rigging/servers/<name>/runs/<startedAt>-<run>.log`, each line stamped in UTC between
-the run's start and exit markers; `status` and `logs` name the current run's file. The runner
-keeps the last 20 runs, at most 100 MiB.
+checkout, and each app in a monorepo, has its own servers. The runner writes each run to its
+own file, `.rigging/servers/<name>/runs/<startedAt>-<run>.log`. The file opens with the run's
+start line and ends with its exit line, and every line carries a UTC timestamp. `status` prints
+the file's path as `log`, and `logs` reads it. The folder keeps the last 20 runs, at most 100 MiB.
 
 A server picks its own port. The command writes `{"port": <n>, "url": "<optional>"}` to the
 file that `$RIGGING_ENDPOINT` names. A Vite server does it with the `serverEndpoint()` plugin
