@@ -1,3 +1,5 @@
+import * as ByteSize from "effect/ByteSize";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -42,6 +44,60 @@ export const files = (name: ServerName) => ({
   logDirectory: `${SERVERS_DIRECTORY}/${name}/log`,
   log: `${SERVERS_DIRECTORY}/${name}/log/current`,
 });
+
+/** A run's log rolls to `<file>.1` past this size, so one run keeps at most twice it. */
+export const RUN_LOG_CAP = ByteSize.mebibytes(50);
+export const RUNS_KEPT = 20;
+export const RUNS_BYTES = ByteSize.mebibytes(100);
+
+/** ISO instants sort as text, so the names sort by start time. */
+export const runLogName = (startedAt: string, run: RunId) =>
+  `${startedAt}-${run}.log`;
+
+export const stamped = (at: DateTime.Utc, line: string) =>
+  line === "" ? "" : `${DateTime.formatIso(at)} ${line}`;
+
+const RUN_FILE = /^(?<log>.+\.log)(?:\.1)?$/u;
+
+/**
+ * The run files to delete before a new run starts, so that it and the runs kept number at most
+ * `RUNS_KEPT` and the kept runs hold at most `RUNS_BYTES`. The newest run is kept whatever its size.
+ */
+export const expired = (
+  files: readonly { readonly name: string; readonly size: ByteSize.ByteSize }[],
+): readonly string[] => {
+  const runs = new Map<
+    string,
+    {
+      readonly log: string;
+      readonly names: readonly string[];
+      readonly size: ByteSize.ByteSize;
+    }
+  >();
+  for (const file of files) {
+    const log = RUN_FILE.exec(file.name)?.groups?.log;
+    if (log === undefined) continue;
+    const run = runs.get(log) ?? { log, names: [], size: ByteSize.zero };
+    runs.set(log, {
+      log,
+      names: [...run.names, file.name],
+      size: ByteSize.sum(run.size, file.size),
+    });
+  }
+  const deleted: string[] = [];
+  let bytes = ByteSize.zero;
+  const newestFirst = [...runs.values()].toSorted((a, b) =>
+    a.log < b.log ? 1 : -1,
+  );
+  for (const [index, run] of newestFirst.entries()) {
+    bytes = ByteSize.sum(bytes, run.size);
+    const kept =
+      index < RUNS_KEPT - 1 &&
+      (index === 0 || ByteSize.isLessThanOrEqualTo(bytes, RUNS_BYTES));
+    if (!kept) deleted.push(...run.names);
+  }
+  return deleted;
+};
 
 const MARKER = "====";
 

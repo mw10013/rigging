@@ -3,15 +3,21 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import * as ByteSize from "effect/ByteSize";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   applyOf,
+  expired,
   listenerOf,
   RunId,
+  runLogName,
   runOutput,
+  RUNS_KEPT,
   ServerName,
+  stamped,
   stateOf,
 } from "./domain.ts";
 
@@ -407,6 +413,84 @@ see .rigging/servers/dev/log/current`;
     expect(restarted.json.run).not.toBe(started.json.run);
     expect(alive(started.json.group)).toBe(false);
   }, 60_000);
+});
+
+describe("run logs", () => {
+  const at = DateTime.makeUnsafe("2026-11-15T08:24:53.894Z");
+
+  it("stamps a line with its UTC instant and leaves an empty line empty", () => {
+    expect(stamped(at, "[03:25:00.159] INFO: Dev · dev-mw")).toBe(
+      "2026-11-15T08:24:53.894Z [03:25:00.159] INFO: Dev · dev-mw",
+    );
+    expect(stamped(at, "")).toBe("");
+  });
+
+  it("names a run's file so the names sort by start time", () => {
+    const names = [
+      runLogName("2026-11-15T08:24:53.894Z", RunId.make("ffffffff")),
+      runLogName("2026-11-15T10:00:00.000Z", RunId.make("00000000")),
+      runLogName("2026-11-14T23:59:59.999Z", RunId.make("aaaaaaaa")),
+    ];
+    expect(names.toSorted()).toEqual([names[2], names[0], names[1]]);
+    expect(names[0]).toBe("2026-11-15T08:24:53.894Z-ffffffff.log");
+  });
+
+  const runFile = (index: number) =>
+    runLogName(
+      `2026-11-15T08:${String(index).padStart(2, "0")}:00.000Z`,
+      RunId.make("0123abcd"),
+    );
+  const small = ByteSize.kibibytes(1);
+
+  it("expires the oldest runs past the count, leaving room for the new one", () => {
+    const files = Array.from({ length: RUNS_KEPT + 2 }, (_, index) => ({
+      name: runFile(index),
+      size: small,
+    }));
+    expect(expired(files).toSorted()).toEqual([
+      runFile(0),
+      runFile(1),
+      runFile(2),
+    ]);
+  });
+
+  it("counts a run's rolled file with it", () => {
+    const files = Array.from({ length: RUNS_KEPT }, (_, index) => ({
+      name: runFile(index),
+      size: small,
+    }));
+    const rolled = [...files, { name: `${runFile(5)}.1`, size: small }];
+    expect(expired(rolled)).toEqual([runFile(0)]);
+    expect(
+      expired([...rolled, { name: `${runFile(0)}.1`, size: small }]).toSorted(),
+    ).toEqual([runFile(0), `${runFile(0)}.1`]);
+  });
+
+  it("expires the older runs once the kept runs pass the bytes", () => {
+    const files = [
+      { name: runFile(3), size: ByteSize.mebibytes(40) },
+      { name: `${runFile(3)}.1`, size: ByteSize.mebibytes(50) },
+      { name: runFile(2), size: ByteSize.mebibytes(5) },
+      { name: runFile(1), size: ByteSize.mebibytes(10) },
+      { name: runFile(0), size: small },
+    ];
+    expect(expired(files).toSorted()).toEqual([runFile(0), runFile(1)]);
+  });
+
+  it("keeps the newest run though it alone passes the bytes", () => {
+    const files = [
+      { name: runFile(1), size: ByteSize.mebibytes(50) },
+      { name: `${runFile(1)}.1`, size: ByteSize.mebibytes(60) },
+      { name: runFile(0), size: small },
+    ];
+    expect(expired(files)).toEqual([runFile(0)]);
+  });
+
+  it("leaves files that are not run logs alone", () => {
+    expect(
+      expired([{ name: "notes.txt", size: ByteSize.gibibytes(1) }]),
+    ).toEqual([]);
+  });
 });
 
 describe("runOutput", () => {
