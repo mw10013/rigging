@@ -15,7 +15,7 @@ module the package's `exports` does not list is internal.
 
 ```sh
 rigging server start <name> -- <command...>   # run a dev server in the background
-rigging server status|stop|logs <name>
+rigging server status|stop|logs <name>        # logs [--run <id>] [-n N] [-f] [--wait <regex> [--since <iso>] [--timeout <s>]]
 rigging server port                           # port=$(rigging server port)
 rigging local start <dev|e2e> -- <command...> # Cloudflare: the server on this checkout's stage
 rigging local destroy <dev|e2e>               # Cloudflare: stop the server, destroy the stage
@@ -28,6 +28,9 @@ checkout, and each app in a monorepo, has its own servers. The runner writes eac
 own file, `.rigging/servers/<name>/runs/<startedAt>-<run>.log`. The file opens with the run's
 start line and ends with its exit line, and every line carries a UTC timestamp. `status` prints
 the file's path as `log`, and `logs` reads it. The folder keeps the last 20 runs, at most 100 MiB.
+`logs -f` exits once the run's exit line prints. `logs --wait <regex>` prints the first line
+written at or after `--since` (default: when it began) whose text after the stamp matches, and
+exits 1 when `--timeout` (default 60 s) passes or the run ends first.
 
 A server picks its own port. The command writes `{"port": <n>, "url": "<optional>"}` to the
 file that `$RIGGING_ENDPOINT` names. A Vite server does it with the `serverEndpoint()` plugin

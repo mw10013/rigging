@@ -14,6 +14,7 @@ import * as Path from "effect/Path";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -26,12 +27,14 @@ import {
   EndpointJson,
   exitMarker,
   files,
+  isExitLine,
   listenerOf,
   type PortListener,
   RUN_LOG_ROLL_AT,
   runFilesToPrune,
   RunId,
   runLog,
+  runOfLog,
   runOutput,
   type ServerName,
   type ServerRecord,
@@ -39,8 +42,10 @@ import {
   SERVERS_DIRECTORY,
   type ServerState,
   stamped,
+  stampOf,
   startMarker,
   stateOf,
+  textOf,
 } from "./domain.ts";
 
 export const START_TIMEOUT = Duration.minutes(3);
@@ -118,10 +123,13 @@ export class StopTimeoutError extends Schema.TaggedError<StopTimeoutError>()(
 
 export class NoRunLogError extends Schema.TaggedError<NoRunLogError>()(
   "NoRunLogError",
-  { name: Schema.String },
+  { name: Schema.String, run: Schema.Option(Schema.String) },
 ) {
   override get message() {
-    return `no run of the ${this.name} server has logged yet`;
+    return Option.match(this.run, {
+      onNone: () => `no run of the ${this.name} server has logged yet`,
+      onSome: (run) => `the ${this.name} server has no log of run ${run}`,
+    });
   }
 }
 
@@ -178,6 +186,85 @@ export const openRunLog = Effect.fn("Server.openRunLog")(function* (
     }).pipe(Effect.mapError(failed), Semaphore.withPermit(writing));
   return { write };
 });
+
+export class LogReadError extends Schema.TaggedError<LogReadError>()(
+  "LogReadError",
+  { name: Schema.String, path: Schema.String, cause: Schema.Defect() },
+) {
+  override get message() {
+    return `could not read ${this.path}, the ${this.name} server's log`;
+  }
+}
+
+const LOG_POLL = Duration.millis(250);
+const LOG_READ_SIZE = 64 * 1024;
+
+export const runLogLines = (
+  path: string,
+  options: { readonly name: ServerName; readonly last?: number },
+) =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const scope = yield* Scope.Scope;
+      const openFile = Effect.gen(function* () {
+        const handle = yield* Scope.fork(scope);
+        const file = yield* fs.open(path).pipe(Scope.provide(handle));
+        return { handle, file, ino: (yield* file.stat).ino };
+      });
+      const current = yield* Ref.make(yield* openFile);
+      const partial = yield* Ref.make("");
+      const decoder = new TextDecoder();
+      const drain = (file: FileSystem.File) =>
+        Effect.gen(function* () {
+          let text = "";
+          while (true) {
+            const bytes = yield* file.readAlloc(LOG_READ_SIZE);
+            if (Option.isNone(bytes)) return text;
+            text += decoder.decode(bytes.value, { stream: true });
+          }
+        });
+      const followRoll = Effect.gen(function* () {
+        const open = yield* Ref.get(current);
+        const now = yield* fs.stat(path).pipe(Effect.option);
+        if (
+          Option.isNone(now) ||
+          Option.getOrUndefined(now.value.ino) ===
+            Option.getOrUndefined(open.ino)
+        )
+          return "";
+        const rest = yield* drain(open.file);
+        yield* Scope.close(open.handle, Exit.void);
+        const next = yield* openFile;
+        yield* Ref.set(current, next);
+        return rest + (yield* drain(next.file));
+      });
+      const poll = Effect.gen(function* () {
+        const open = yield* Ref.get(current);
+        const text = (yield* drain(open.file)) + (yield* followRoll);
+        const lines = `${yield* Ref.get(partial)}${text}`.split("\n");
+        yield* Ref.set(partial, lines.pop() ?? "");
+        return lines;
+      });
+      const last = options.last ?? Number.POSITIVE_INFINITY;
+      return Stream.concat(
+        Stream.fromIterableEffect(
+          poll.pipe(
+            Effect.map((lines) =>
+              lines.slice(Math.max(lines.length - last, 0)),
+            ),
+          ),
+        ),
+        Stream.fromEffectSchedule(poll, Schedule.spaced(LOG_POLL)).pipe(
+          Stream.flattenIterable,
+        ),
+      );
+    }),
+  ).pipe(
+    Stream.mapError(
+      (cause) => new LogReadError({ name: options.name, path, cause }),
+    ),
+  );
 
 const at = Effect.fn("Server.at")(function* (root: string, relative: string) {
   const path = yield* Path.Path;
@@ -632,7 +719,7 @@ const sight = Effect.fn("Server.sight")(function* (
 export const status = (root: string, name: ServerName) =>
   sight(root, name).pipe(Effect.map(({ status }) => status));
 
-const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
+const runLogOf = Effect.fn("Server.runLogOf")(function* (
   root: string,
   name: ServerName,
   runId: RunId,
@@ -640,9 +727,21 @@ const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
   const file = (yield* runNames(root, name)).find((found) =>
     found.endsWith(`-${runId}.log`),
   );
-  if (file === undefined)
+  return Option.map(
+    Option.fromNullishOr(file),
+    (found) => `${files(name).runs}/${found}`,
+  );
+});
+
+const runOutputOf = Effect.fn("Server.runOutputOf")(function* (
+  root: string,
+  name: ServerName,
+  runId: RunId,
+) {
+  const found = yield* runLogOf(root, name, runId);
+  if (Option.isNone(found))
     return `(run ${runId} wrote nothing to ${files(name).runs})`;
-  const log = `${files(name).runs}/${file}`;
+  const log = found.value;
   return Option.match(
     Option.flatMap(yield* readFile(yield* at(root, log)), runOutput),
     {
@@ -811,30 +910,97 @@ export const stop = Effect.fn("Server.stop")(function* (
   return true;
 });
 
+export class LogWaitTimeoutError extends Schema.TaggedError<LogWaitTimeoutError>()(
+  "LogWaitTimeoutError",
+  { name: Schema.String, pattern: Schema.String, seconds: Schema.Number },
+) {
+  override get message() {
+    return `no line of the ${this.name} server's log matched /${this.pattern}/ within ${String(this.seconds)}s`;
+  }
+}
+
+export class RunEndedError extends Schema.TaggedError<RunEndedError>()(
+  "RunEndedError",
+  { name: Schema.String, run: Schema.String, exit: Schema.String },
+) {
+  override get message() {
+    return `the ${this.name} server's run ${this.run} ended before a line matched\n${this.exit}`;
+  }
+}
+
+export type Reading =
+  | { readonly _tag: "Print"; readonly lines: number }
+  | { readonly _tag: "Follow"; readonly lines: number }
+  | {
+      readonly _tag: "Wait";
+      readonly pattern: RegExp;
+      readonly since: DateTime.Utc;
+      readonly timeout: Duration.Duration;
+    };
+
 export const logs = Effect.fn("Server.logs")(function* (
   root: string,
   name: ServerName,
-  lines: number,
-  follow: boolean,
+  options: { readonly run: Option.Option<RunId>; readonly reading: Reading },
 ) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const log = yield* recordedOrNewestRunLog(
-    root,
-    name,
-    yield* readRecord(root, name),
+  const fs = yield* FileSystem.FileSystem;
+  const log = yield* Option.match(options.run, {
+    onSome: (runId) => runLogOf(root, name, runId),
+    onNone: () =>
+      readRecord(root, name).pipe(
+        Effect.flatMap((record) => recordedOrNewestRunLog(root, name, record)),
+      ),
+  });
+  const found = Option.flatMap(log, (relative) =>
+    Option.map(runOfLog(relative), (runId) => ({ relative, runId })),
   );
-  if (Option.isNone(log)) return yield* new NoRunLogError({ name });
-  // A run's log rolls by renaming it; -F reopens it by name.
-  yield* spawner.exitCode(
-    ChildProcess.make(
-      "tail",
-      [
-        ...(follow ? ["-F"] : []),
-        "-n",
-        String(lines),
-        yield* at(root, log.value),
-      ],
-      { stdin: "ignore", stdout: "inherit", stderr: "inherit" },
+  if (Option.isNone(found))
+    return yield* new NoRunLogError({ name, run: options.run });
+  const { relative, runId } = found.value;
+  const path = yield* at(root, relative);
+  const { reading } = options;
+  if (reading._tag === "Print") {
+    const text = yield* fs
+      .readFileString(path)
+      .pipe(
+        Effect.mapError((cause) => new LogReadError({ name, path, cause })),
+      );
+    const lines = text.split("\n");
+    if (lines.at(-1) === "") lines.pop();
+    for (const line of lines.slice(Math.max(lines.length - reading.lines, 0)))
+      yield* Console.log(line);
+    return;
+  }
+  if (reading._tag === "Follow")
+    return yield* runLogLines(path, { name, last: reading.lines }).pipe(
+      Stream.takeUntil((line) => isExitLine(line, name, runId)),
+      Stream.runForEach(Console.log),
+    );
+  const { pattern, since, timeout } = reading;
+  const matched = yield* runLogLines(path, { name }).pipe(
+    Stream.filter(
+      (candidate) =>
+        isExitLine(candidate, name, runId) ||
+        (Option.exists(stampOf(candidate), (stamp) =>
+          DateTime.isGreaterThanOrEqualTo(stamp, since),
+        ) &&
+          pattern.test(textOf(candidate))),
     ),
+    Stream.runHead,
+    Effect.timeoutOrElse({
+      duration: timeout,
+      orElse: () =>
+        Effect.fail(
+          new LogWaitTimeoutError({
+            name,
+            pattern: pattern.source,
+            seconds: Duration.toSeconds(timeout),
+          }),
+        ),
+    }),
   );
+  const line = yield* Effect.orDie(Effect.fromOption(matched));
+  if (isExitLine(line, name, runId))
+    return yield* new RunEndedError({ name, run: runId, exit: line });
+  yield* Console.log(line);
 });
