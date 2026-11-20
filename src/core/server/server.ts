@@ -14,6 +14,7 @@ import * as Path from "effect/Path";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -178,6 +179,87 @@ export const openRunLog = Effect.fn("Server.openRunLog")(function* (
     }).pipe(Effect.mapError(failed), Semaphore.withPermit(writing));
   return { write };
 });
+
+export class LogReadError extends Schema.TaggedError<LogReadError>()(
+  "LogReadError",
+  { name: Schema.String, path: Schema.String, cause: Schema.Defect() },
+) {
+  override get message() {
+    return `could not read ${this.path}, the ${this.name} server's log`;
+  }
+}
+
+const LOG_POLL = Duration.millis(250);
+const LOG_READ_SIZE = 64 * 1024;
+
+/**
+ * The run log's complete lines as they are written, from the start of the file, or only the last
+ * `last` of those already written. A roll shows as the path naming another inode: the old file is
+ * read to its end, then the new one from its start. The stream ends only when its consumer stops.
+ */
+export const runLogLines = (
+  path: string,
+  options: { readonly name: ServerName; readonly last?: number },
+) =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const scope = yield* Scope.Scope;
+      const openFile = Effect.gen(function* () {
+        const handle = yield* Scope.fork(scope);
+        const file = yield* fs.open(path).pipe(Scope.provide(handle));
+        return { handle, file, ino: (yield* file.stat).ino };
+      });
+      const current = yield* Ref.make(yield* openFile);
+      const partial = yield* Ref.make("");
+      const decoder = new TextDecoder();
+      const drain = (file: FileSystem.File) =>
+        Effect.gen(function* () {
+          let text = "";
+          while (true) {
+            const bytes = yield* file.readAlloc(LOG_READ_SIZE);
+            if (Option.isNone(bytes)) return text;
+            text += decoder.decode(bytes.value, { stream: true });
+          }
+        });
+      const poll = Effect.gen(function* () {
+        const open = yield* Ref.get(current);
+        let text = yield* drain(open.file);
+        const now = yield* fs.stat(path).pipe(Effect.option);
+        if (
+          Option.isSome(now) &&
+          Option.getOrUndefined(now.value.ino) !==
+            Option.getOrUndefined(open.ino)
+        ) {
+          text += yield* drain(open.file);
+          yield* Scope.close(open.handle, Exit.void);
+          const next = yield* openFile;
+          yield* Ref.set(current, next);
+          text += yield* drain(next.file);
+        }
+        const lines = `${yield* Ref.get(partial)}${text}`.split("\n");
+        yield* Ref.set(partial, lines.pop() ?? "");
+        return lines;
+      });
+      const last = options.last ?? Number.POSITIVE_INFINITY;
+      return Stream.concat(
+        Stream.fromIterableEffect(
+          poll.pipe(
+            Effect.map((lines) =>
+              lines.slice(Math.max(lines.length - last, 0)),
+            ),
+          ),
+        ),
+        Stream.fromEffectSchedule(poll, Schedule.spaced(LOG_POLL)).pipe(
+          Stream.flattenIterable,
+        ),
+      );
+    }),
+  ).pipe(
+    Stream.mapError(
+      (cause) => new LogReadError({ name: options.name, path, cause }),
+    ),
+  );
 
 const at = Effect.fn("Server.at")(function* (root: string, relative: string) {
   const path = yield* Path.Path;
