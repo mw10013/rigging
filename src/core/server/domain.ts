@@ -130,6 +130,24 @@ const RUN_OUTPUT_LINES = 60;
 const STAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /u;
 const START = /^==== \S+ start /u;
 
+export const textOf = (line: string) => line.replace(STAMP, "");
+
+export const stampOf = (line: string): Option.Option<DateTime.Utc> =>
+  Option.flatMap(
+    Option.fromNullishOr(STAMP.exec(line)?.[0].trimEnd()),
+    DateTime.make,
+  );
+
+export const isExitLine = (line: string, name: ServerName, run: RunId) =>
+  textOf(line).startsWith(`${[MARKER, name, "exit", `run=${run}`].join(" ")} `);
+
+const RUN_LOG_RUN = /-(?<run>[0-9a-f]{8})\.log$/u;
+
+export const runOfLog = (log: string): Option.Option<RunId> =>
+  Option.map(Option.fromNullishOr(RUN_LOG_RUN.exec(log)?.groups?.run), (run) =>
+    RunId.make(run),
+  );
+
 export const runOutput = (log: string): Option.Option<string> => {
   const body = log.split("\n").filter((line) => {
     const text = line.replace(STAMP, "");

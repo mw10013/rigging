@@ -10,14 +10,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   applyOf,
+  exitMarker,
+  isExitLine,
   listenerOf,
   runFilesToPrune,
   RunId,
   runLogName,
+  runOfLog,
   runOutput,
   RUNS_KEPT,
   ServerName,
   stamped,
+  stampOf,
   stateOf,
 } from "./domain.ts";
 
@@ -460,6 +464,49 @@ describe("run logs", () => {
       "2026-11-15T08:24:53.894Z [03:25:00.159] INFO: Dev · dev-mw",
     );
     expect(stamped(at, "")).toBe("");
+  });
+
+  it("reads a line's stamp, and none from a line without one", () => {
+    expect(
+      Option.map(
+        stampOf("2026-11-15T08:24:53.894Z ready later"),
+        DateTime.formatIso,
+      ),
+    ).toEqual(Option.some("2026-11-15T08:24:53.894Z"));
+    expect(stampOf("ready later")).toEqual(Option.none());
+    expect(stampOf("")).toEqual(Option.none());
+  });
+
+  it("knows the run's exit line from its other lines", () => {
+    const dev = ServerName.make("dev");
+    const run = RunId.make("0123abcd");
+    const exit = stamped(at, exitMarker(dev, run, { _tag: "Exited", code: 0 }));
+    expect(isExitLine(exit, dev, run)).toBe(true);
+    expect(isExitLine(exit, dev, RunId.make("ffffffff"))).toBe(false);
+    expect(isExitLine(exit, ServerName.make("e2e"), run)).toBe(false);
+    expect(
+      isExitLine(
+        stamped(at, "echo ==== dev exit run=0123abcd code=0"),
+        dev,
+        run,
+      ),
+    ).toBe(false);
+    expect(
+      isExitLine(
+        stamped(at, exitMarker(dev, run, { _tag: "Interrupted" })),
+        dev,
+        run,
+      ),
+    ).toBe(true);
+  });
+
+  it("reads the run from a run file's path", () => {
+    expect(
+      runOfLog(
+        `.rigging/servers/dev/runs/${runLogName("2026-11-15T08:24:53.894Z", RunId.make("0123abcd"))}`,
+      ),
+    ).toEqual(Option.some("0123abcd"));
+    expect(runOfLog(".rigging/servers/dev/log")).toEqual(Option.none());
   });
 
   it("names a run's file so the names sort by start time", () => {
