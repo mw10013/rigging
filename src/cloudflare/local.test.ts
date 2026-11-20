@@ -24,6 +24,7 @@ exit "\${ALCHEMY_EXIT:-0}"
 interface Printed {
   readonly state: string;
   readonly run: string;
+  readonly log: string;
   readonly error: { readonly _tag: string; readonly message: string };
 }
 
@@ -91,10 +92,7 @@ describe("rigging local start", () => {
       args: ["--x"],
     });
     expect(
-      fs.readFileSync(
-        path.join(checkout, ".rigging/servers/e2e/log/current"),
-        "utf8",
-      ),
+      fs.readFileSync(path.join(checkout, started.json.log), "utf8"),
     ).toMatch(/==== e2e start \S+ run=\S+ stage=e2e-mw/u);
 
     expect(

@@ -41,8 +41,7 @@ export const files = (name: ServerName) => ({
   directory: `${SERVERS_DIRECTORY}/${name}`,
   record: `${SERVERS_DIRECTORY}/${name}/record.json`,
   endpoint: `${SERVERS_DIRECTORY}/${name}/endpoint.json`,
-  logDirectory: `${SERVERS_DIRECTORY}/${name}/log`,
-  log: `${SERVERS_DIRECTORY}/${name}/log/current`,
+  runs: `${SERVERS_DIRECTORY}/${name}/runs`,
 });
 
 /** A run's log rolls to `<file>.1` past this size, so one run keeps at most twice it. */
@@ -53,6 +52,10 @@ export const RUNS_BYTES = ByteSize.mebibytes(100);
 /** ISO instants sort as text, so the names sort by start time. */
 export const runLogName = (startedAt: string, run: RunId) =>
   `${startedAt}-${run}.log`;
+
+export const runLog = (
+  record: Pick<ServerRecord, "name" | "startedAt" | "run">,
+) => `${files(record.name).runs}/${runLogName(record.startedAt, record.run)}`;
 
 export const stamped = (at: DateTime.Utc, line: string) =>
   line === "" ? "" : `${DateTime.formatIso(at)} ${line}`;
@@ -129,36 +132,18 @@ export const exitMarker = (name: ServerName, run: RunId, ending: Ending) =>
 
 const RUN_OUTPUT_LINES = 60;
 
-/** `s6-log` puts a timestamp before each line, so a marker is found inside the line, not at its start. */
-const runLines = (
-  log: string,
-  name: ServerName,
-  run: RunId,
-): Option.Option<readonly string[]> => {
-  const lines = log.split("\n");
-  const start = lines.findIndex(
-    (line) =>
-      line.includes(`${MARKER} ${name} start `) && line.includes(`run=${run}`),
-  );
-  if (start === -1) return Option.none();
-  const after = lines.slice(start + 1);
-  const end = after.findIndex((line) =>
-    line.includes(`${MARKER} ${name} exit run=${run} `),
-  );
-  return Option.some(end === -1 ? after : after.slice(0, end + 1));
-};
+const STAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /u;
+const START = /^==== \S+ start /u;
 
-export const runOutput = (
-  log: string,
-  name: ServerName,
-  run: RunId,
-): Option.Option<string> =>
-  Option.flatMap(runLines(log, name, run), (lines) => {
-    const body = lines.filter((line) => line.trim() !== "");
-    return body.length === 0
-      ? Option.none()
-      : Option.some(body.slice(-RUN_OUTPUT_LINES).join("\n"));
+export const runOutput = (log: string): Option.Option<string> => {
+  const body = log.split("\n").filter((line) => {
+    const text = line.replace(STAMP, "");
+    return text.trim() !== "" && !START.test(text);
   });
+  return body.length === 0
+    ? Option.none()
+    : Option.some(body.slice(-RUN_OUTPUT_LINES).join("\n"));
+};
 
 export type Apply =
   | { readonly _tag: "None" }
@@ -188,29 +173,28 @@ const APPLY_EVENTS: readonly (readonly [RegExp, (text: string) => Apply])[] = [
 
 /**
  * Alchemy logs a failure report as one record, `alchemy dev: … failed; …` and then its cause on
- * the following lines, so the line after the header carries only `s6-log`'s timestamp and starts
+ * the following lines, so the line after the header carries only the runner's stamp and starts
  * with the cause's `<Tag>: <message>`.
  */
 const REPORT = /^alchemy dev: (?:apply|run) failed;/u;
-const S6_STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ {2}/u;
 
 /** `[<fqn>] fail (<mode>) — <Tag>: <message> (<elapsed>)`, which a resource logs as it fails. */
 const RESOURCE_FAILURE =
   /\] ERROR: \[[^\]]+\] fail(?: \([^)]*\))? — (?<message>.+?)(?: {1,2}\((?:\d+(?:\.\d+)?(?:ms|[smh]) ?)+\))?$/u;
 
 const reportDiagnostic = (line: string) => {
-  const text = line.replace(S6_STAMP, "");
+  const text = line.replace(STAMP, "");
   return text === "" || /^[\s[]/u.test(text) || text.startsWith(MARKER)
     ? null
     : text;
 };
 
-export const applyOf = (log: string, name: ServerName, run: RunId): Apply => {
+export const applyOf = (log: string): Apply => {
   let apply: Apply = { _tag: "None" };
   let pendingReport = false;
   let diagnostic: string | null = null;
   let firstResourceFailure: string | null = null;
-  for (const line of Option.getOrElse(runLines(log, name, run), () => [])) {
+  for (const line of log.split("\n")) {
     if (pendingReport) {
       diagnostic = reportDiagnostic(line);
       pendingReport = false;
