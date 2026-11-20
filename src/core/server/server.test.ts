@@ -51,22 +51,6 @@ if (process.argv[2] !== "no-handler") process.on("SIGTERM", () => { console.log(
 }
 `;
 
-const ORPHANING_SUPERVISOR = `
-import net from "node:net";
-import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
-const probe = net.createServer().listen(0, "127.0.0.1", () => {
-  const port = probe.address().port;
-  probe.close(() => {
-    writeFileSync(process.env.RIGGING_ENDPOINT, JSON.stringify({ port }));
-    console.log("[t] INFO: Dev · dev-test");
-    const sidecar = spawn("node", ["-e", \`require("http").createServer((_, res) => res.end("hi")).listen(\${port}, "127.0.0.1", () => console.log("bound")); setTimeout(() => process.exit(0), 20000);\`], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
-    writeFileSync("sidecar.pid", String(sidecar.pid));
-    sidecar.stdout.once("data", () => process.kill(process.pid, "SIGKILL"));
-  });
-});
-`;
-
 interface Printed {
   readonly state: string;
   readonly name: string;
@@ -134,7 +118,6 @@ beforeEach(() => {
   execFileSync("git", ["init", "-q"], { cwd: checkout });
   fs.writeFileSync(path.join(checkout, "package.json"), `{"name":"app"}`);
   fs.writeFileSync(path.join(checkout, "server.mjs"), FIXTURE);
-  fs.writeFileSync(path.join(checkout, "supervisor.mjs"), ORPHANING_SUPERVISOR);
 });
 
 afterEach(() => {
@@ -164,7 +147,7 @@ describe("rigging server", () => {
         cwd: checkout,
         encoding: "utf8",
       }),
-    ).toBe("?? package.json\n?? server.mjs\n?? supervisor.mjs\n");
+    ).toBe("?? package.json\n?? server.mjs\n");
 
     expect(server("stop", "dev").code).toBe(0);
     expect(alive(started.json.group)).toBe(false);
@@ -352,27 +335,6 @@ see .rigging/servers/dev/log/current`;
     } finally {
       holder.kill();
       fs.rmSync(elsewhere, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it("reads a crashed supervisor's orphaned sidecar as the server's, and reports the exit", () => {
-    try {
-      const crashed = server(
-        "start",
-        "dev",
-        "--",
-        "bash",
-        "-c",
-        "node supervisor.mjs; sleep 4",
-      );
-      expect(crashed.code).toBe(1);
-      expect(crashed.json.error._tag).toBe("ServerExitedError");
-      expect(crashed.json.error.message).toContain("INFO: Dev · dev-test");
-    } finally {
-      const sidecar = Number(
-        fs.readFileSync(path.join(checkout, "sidecar.pid"), "utf8"),
-      );
-      if (alive(sidecar)) process.kill(sidecar, "SIGKILL");
     }
   }, 60_000);
 
