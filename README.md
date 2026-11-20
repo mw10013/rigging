@@ -19,7 +19,7 @@ rigging server status|stop|logs <name>
 rigging server port                           # port=$(rigging server port)
 rigging local start <dev|e2e> -- <command...> # Cloudflare: the server on this checkout's stage
 rigging local destroy <dev|e2e>               # Cloudflare: stop the server, destroy the stage
-rigging stage up|check|reset <stage>          # Cloudflare: Workers Builds deploys
+rigging stage up|check|wait|reset <stage>     # Cloudflare: Workers Builds deploys
 rigging logs show|follow|wait <stage>         # Cloudflare: a deployed stage's Worker logs
 ```
 

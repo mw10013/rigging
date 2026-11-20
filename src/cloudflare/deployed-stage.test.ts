@@ -1,15 +1,21 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
 import * as Cause from "effect/Cause";
+import * as Console from "effect/Console";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 import {
   afterEach,
   beforeEach,
@@ -34,6 +40,7 @@ import {
   staleVariables,
   up,
   variableProblems,
+  wait,
 } from "./deployed-stage.ts";
 
 const TOKEN = "9faa0f15-edb6-4265-aa27-2f944dd4c14e";
@@ -367,6 +374,12 @@ case "$*" in
     echo "$*" > "$DEVKIT_FAKES/build.args"
     echo '{"build_uuid":"b1","status":"queued","build_outcome":null}' ;;
   "builds get b1") echo '{"build_uuid":"b1","status":"stopped","build_outcome":"success"}' ;;
+  "builds list --worker "*)
+    n=$(cat "$DEVKIT_FAKES/lists" 2>/dev/null || echo 0)
+    echo $((n + 1)) > "$DEVKIT_FAKES/lists"
+    echo 'result_info: {"page":1}' >&2
+    if [ -f "$DEVKIT_FAKES/builds.$n.json" ]; then cat "$DEVKIT_FAKES/builds.$n.json"
+    else cat "$DEVKIT_FAKES/builds.json"; fi ;;
   *) echo "unexpected cf $*" >&2; exit 1 ;;
 esac
 `,
@@ -379,6 +392,7 @@ case "$*" in
   "rev-parse HEAD") cat "$DEVKIT_FAKES/head" ;;
   "rev-parse origin/"*) cat "$DEVKIT_FAKES/origin" ;;
   "remote get-url origin") echo "git@github.com:owner/baton.git" ;;
+  "ls-remote origin main") printf 'c2\trefs/heads/main\n' ;;
   *) echo "unexpected git $*" >&2; exit 1 ;;
 esac
 `,
@@ -622,4 +636,129 @@ export default Schema.Struct({
       "must export a Schema.Struct of the stage's fields as its default",
     );
   });
+});
+
+describe("wait", () => {
+  const { fake, read } = useFakes();
+  const builds = (
+    file: string,
+    ...list: readonly {
+      readonly uuid: string;
+      readonly commit: string;
+      readonly status: string;
+      readonly outcome: string | null;
+    }[]
+  ) => {
+    fs.writeFileSync(
+      fake(file),
+      JSON.stringify(
+        list.map(({ uuid, commit, status, outcome }) => ({
+          build_uuid: uuid,
+          status,
+          build_outcome: outcome,
+          build_trigger_metadata: { commit_hash: commit },
+        })),
+      ),
+    );
+  };
+  const older = {
+    uuid: "b-old",
+    commit: "c1",
+    status: "stopped",
+    outcome: "success",
+  };
+
+  /** Advances the test clock in steps of real time, so each poll's child process can run. */
+  const run = Effect.gen(function* () {
+    const printed: string[] = [];
+    const errors: string[] = [];
+    const fiber = yield* Effect.forkChild(
+      wait("staging").pipe(
+        Effect.provide(NodeServices.layer),
+        Effect.provideService(Console.Console, {
+          ...globalThis.console,
+          log: (...args: readonly unknown[]) => {
+            printed.push(args.join(" "));
+          },
+          error: (...args: readonly unknown[]) => {
+            errors.push(args.join(" "));
+          },
+        }),
+        Effect.exit,
+      ),
+    );
+    while (fiber.pollUnsafe() === undefined) {
+      yield* Effect.promise(() => sleep(10));
+      yield* TestClock.adjust(Duration.minutes(1));
+    }
+    return { exit: yield* Fiber.join(fiber), printed, errors };
+  });
+
+  beforeEach(() => {
+    fs.writeFileSync(fake("scripts.json"), website("staging", "tag-old"));
+  });
+
+  effectIt.effect(
+    "prints the uuid of the succeeded build of origin's main",
+    () =>
+      Effect.gen(function* () {
+        builds(
+          "builds.json",
+          { uuid: "b2", commit: "c2", status: "stopped", outcome: "success" },
+          older,
+        );
+        const { exit, printed, errors } = yield* run;
+        expect(failureOf(exit)).toBe("");
+        expect(printed).toStrictEqual(["b2"]);
+        expect(errors).toStrictEqual([
+          "stage: waiting for the build of main c2",
+        ]);
+      }),
+  );
+
+  effectIt.effect(
+    "names the outcome and the logs command of a failed build",
+    () =>
+      Effect.gen(function* () {
+        builds(
+          "builds.json",
+          { uuid: "b2", commit: "c2", status: "stopped", outcome: "failure" },
+          older,
+        );
+        const { exit, printed } = yield* run;
+        expect(failureOf(exit)).toContain(
+          "build b2 ended failure; read cf builds logs get b2",
+        );
+        expect(printed).toStrictEqual([]);
+      }),
+  );
+
+  effectIt.effect("waits for a running build to stop", () =>
+    Effect.gen(function* () {
+      builds(
+        "builds.0.json",
+        { uuid: "b2", commit: "c2", status: "running", outcome: null },
+        older,
+      );
+      builds(
+        "builds.json",
+        { uuid: "b2", commit: "c2", status: "stopped", outcome: "success" },
+        older,
+      );
+      const { exit, printed } = yield* run;
+      expect(failureOf(exit)).toBe("");
+      expect(printed).toStrictEqual(["b2"]);
+      expect(Number(read("lists"))).toBeGreaterThan(1);
+    }),
+  );
+
+  effectIt.effect("says no build of the commit started when none appears", () =>
+    Effect.gen(function* () {
+      builds("builds.json", older);
+      const { exit } = yield* run;
+      expect(failureOf(exit)).toContain(
+        "no build of main c2 started within 30m; a push whose paths match no build filter starts none",
+      );
+    }),
+  );
 });
