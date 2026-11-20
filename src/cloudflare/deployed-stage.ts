@@ -546,9 +546,44 @@ const Build = Schema.Struct({
   status: Schema.String,
   build_outcome: Schema.NullOr(Schema.String),
 });
+type Build = typeof Build.Type;
+
+const CommitBuilds = Schema.Array(
+  Schema.Struct({
+    ...Build.fields,
+    build_trigger_metadata: Schema.Struct({ commit_hash: Schema.String }),
+  }),
+);
 
 const BUILD_POLL = Duration.seconds(15);
 const BUILD_TIMEOUT = Duration.minutes(30);
+
+const logsOf = (build: Build) => `cf builds logs get ${build.build_uuid}`;
+
+const isStopped = (build: Option.Option<Build>) =>
+  Option.exists(build, ({ status }) => status === "stopped");
+
+/** Polls until the build `poll` reads has stopped, and fails unless it succeeded. */
+const awaitBuild = Effect.fn("DeployedStage.awaitBuild")(function* <
+  A extends Build,
+  R,
+>(poll: Effect.Effect<Option.Option<A>, StageError, R>, missing: string) {
+  const latest = yield* poll.pipe(
+    Effect.repeat({ schedule: Schedule.spaced(BUILD_POLL), until: isStopped }),
+    Effect.timeoutOrElse({ duration: BUILD_TIMEOUT, orElse: () => poll }),
+  );
+  if (Option.isNone(latest)) return yield* new StageError({ message: missing });
+  const build = latest.value;
+  if (build.status !== "stopped")
+    return yield* new StageError({
+      message: `build ${build.build_uuid} is still running; watch it with ${logsOf(build)}`,
+    });
+  if (build.build_outcome !== "success")
+    return yield* new StageError({
+      message: `build ${build.build_uuid} ended ${build.build_outcome ?? "without an outcome"}; read ${logsOf(build)}`,
+    });
+  return build;
+});
 
 const build = Effect.fn("DeployedStage.build")(function* (
   stage: Deployed,
@@ -561,31 +596,55 @@ const build = Effect.fn("DeployedStage.build")(function* (
     "--branch",
     branchOf(stage),
   ]).pipe(Effect.flatMap(decodeJson(Build, "cf builds create")));
-  const logs = `cf builds logs get ${started.build_uuid}`;
   yield* Console.error(
-    `stage: started build ${started.build_uuid} of ${branchOf(stage)}; its log: ${logs}`,
+    `stage: started build ${started.build_uuid} of ${branchOf(stage)}; its log: ${logsOf(started)}`,
   );
-  const done = yield* cf(["builds", "get", started.build_uuid]).pipe(
-    Effect.flatMap(decodeJson(Build, "cf builds get")),
-    Effect.repeat({
-      schedule: Schedule.spaced(BUILD_POLL),
-      until: (current) => current.status === "stopped",
-    }),
-    Effect.timeoutOrElse({
-      duration: BUILD_TIMEOUT,
-      orElse: () =>
-        Effect.fail(
-          new StageError({
-            message: `build ${started.build_uuid} is still running; watch it with ${logs}`,
-          }),
-        ),
-    }),
+  const done = yield* awaitBuild(
+    cf(["builds", "get", started.build_uuid]).pipe(
+      Effect.flatMap(decodeJson(Build, "cf builds get")),
+      Effect.map(Option.some),
+    ),
+    `build ${started.build_uuid} is gone`,
   );
-  if (done.build_outcome !== "success")
-    return yield* new StageError({
-      message: `build ${done.build_uuid} ended ${done.build_outcome ?? "without an outcome"}; read ${logs}`,
-    });
   yield* Console.log(`${stage}: build ${done.build_uuid} succeeded`);
+});
+
+const listBuilds = (tag: string, count: number) =>
+  cf(["builds", "list", "--worker", tag, "--per-page", String(count)]).pipe(
+    Effect.flatMap(decodeJson(CommitBuilds, "cf builds list")),
+  );
+
+/** Waits for the build of the commit at the head of the stage's branch on origin. */
+export const wait = Effect.fn("DeployedStage.wait")(function* (
+  stage: Deployed,
+) {
+  const tag = yield* findTag(websiteOf(stage));
+  if (Option.isNone(tag))
+    return yield* new StageError({
+      message: `${websiteOf(stage)} does not exist; run vp run stage up ${stage}`,
+    });
+  const branch = branchOf(stage);
+  const [commit = ""] = (yield* git(["ls-remote", "origin", branch])).split(
+    /\s/u,
+  );
+  if (commit === "")
+    return yield* new StageError({
+      message: `origin has no branch ${branch}`,
+    });
+  yield* Console.error(`stage: waiting for the build of ${branch} ${commit}`);
+  const done = yield* awaitBuild(
+    listBuilds(tag.value, 10).pipe(
+      Effect.map((builds) =>
+        Array.findFirst(
+          builds,
+          (candidate) =>
+            candidate.build_trigger_metadata.commit_hash === commit,
+        ),
+      ),
+    ),
+    `no build of ${branch} ${commit} started within ${Duration.format(BUILD_TIMEOUT)}; a push whose paths match no build filter starts none`,
+  );
+  yield* Console.log(done.build_uuid);
 });
 
 // Runs from a laptop: the Builds API takes only a user API token.
@@ -712,13 +771,6 @@ const plan = Effect.fn("DeployedStage.plan")(function* (
   };
 }, Effect.scoped);
 
-const LatestBuilds = Schema.Array(
-  Schema.Struct({
-    build_uuid: Schema.String,
-    build_outcome: Schema.NullOr(Schema.String),
-  }),
-);
-
 export const check = Effect.fn("DeployedStage.check")(function* (
   stage: Deployed,
 ) {
@@ -751,20 +803,17 @@ export const check = Effect.fn("DeployedStage.check")(function* (
           config.value.production_settings.environment_variables,
         ),
       );
-      const [latest] = yield* cf([
-        "builds",
-        "list",
-        "--worker",
-        tag.value,
-        "--per-page",
-        "1",
-      ]).pipe(Effect.flatMap(decodeJson(LatestBuilds, "cf builds list")));
+      const [latest] = yield* listBuilds(tag.value, 1);
       if (latest === undefined) problems.push("no build has run");
+      else if (latest.status !== "stopped")
+        yield* Console.log(
+          `${stage}: build ${latest.build_uuid} of ${latest.build_trigger_metadata.commit_hash} is running; wait for it with vp run stage wait ${stage}`,
+        );
       else if (latest.build_outcome === "success")
         yield* Console.log(`${stage}: build ${latest.build_uuid} succeeded`);
       else
         problems.push(
-          `the latest build ${latest.build_uuid} ended ${latest.build_outcome ?? "without an outcome yet"}`,
+          `the latest build ${latest.build_uuid} ended ${latest.build_outcome ?? "without an outcome"}`,
         );
     }
   }
@@ -823,7 +872,17 @@ const checkCommand = Command.make(
   ({ stage }) => check(stage).pipe(Effect.mapError(toUserError)),
 ).pipe(
   Command.withDescription(
-    "Read only: whether the plan succeeds and replaces the Website, the build configuration is canonical, its variables match .env.<stage> by name, and the latest build succeeded.",
+    "Read only: whether the plan succeeds and replaces the Website, the build configuration is canonical, its variables match .env.<stage> by name, and the latest build succeeded or is still running.",
+  ),
+);
+
+const waitCommand = Command.make(
+  "wait",
+  { stage: stageArgument },
+  ({ stage }) => wait(stage).pipe(Effect.mapError(toUserError)),
+).pipe(
+  Command.withDescription(
+    "Read only: wait for the build of the stage's branch head on origin to finish, print its uuid if it succeeded, and fail otherwise.",
   ),
 );
 
@@ -856,7 +915,7 @@ const resetCommand = Command.make(
 
 export const command = Command.make("stage").pipe(
   Command.withDescription(
-    "Set up, check and reset staging and production's Workers Builds deploys.",
+    "Set up, check, wait on and reset staging and production's Workers Builds deploys.",
   ),
-  Command.withSubcommands([upCommand, checkCommand, resetCommand]),
+  Command.withSubcommands([upCommand, checkCommand, waitCommand, resetCommand]),
 );
