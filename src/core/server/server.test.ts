@@ -346,6 +346,37 @@ see ${now.json.log}`;
     expect(log()).toContain("Done: 6 succeeded");
   }, 60_000);
 
+  it("fails a start at once when lsof is not on PATH, launching nothing", () => {
+    const found = (program: string) =>
+      execFileSync("sh", ["-c", `command -v ${program}`], {
+        encoding: "utf8",
+      }).trim();
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "rigging-bin-"));
+    for (const program of ["ps", "sh", "sleep"])
+      fs.symlinkSync(found(program), path.join(bin, program));
+    const vpx = path.dirname(found("vpx"));
+    const node = path.dirname(found("node"));
+    try {
+      const began = performance.now();
+      const started = serverWith(
+        checkout,
+        { PATH: [bin, vpx, node].join(path.delimiter) },
+        "start",
+        "dev",
+        "--",
+        "node",
+        "server.mjs",
+      );
+      expect(performance.now() - began).toBeLessThan(30_000);
+      expect(started.code).toBe(1);
+      expect(started.json.error._tag).toBe("ToolMissingError");
+      expect(started.json.error.message).toContain("lsof");
+      expect(fs.existsSync(path.join(checkout, ".rigging"))).toBe(false);
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("logs the exit of a server that SIGTERM ends without its own handler", () => {
     const started = server(
       "start",
