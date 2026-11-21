@@ -31,6 +31,12 @@ const output = (program: string, args: readonly string[]) => {
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch (error) {
+    // Read as "", a missing program would hide every orphan.
+    if (Predicate.hasProperty(error, "code") && error.code === "ENOENT")
+      throw new Error(
+        `${program} is not on PATH; rigging needs ps and lsof (on Arch: pacman -S lsof)`,
+        { cause: error },
+      );
     // `lsof` exits 1 when some pid has gone, and still prints the rest.
     return Predicate.hasProperty(error, "stdout") &&
       Predicate.isString(error.stdout)

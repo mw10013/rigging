@@ -112,6 +112,15 @@ export class PortTakenError extends Schema.TaggedError<PortTakenError>()(
   }
 }
 
+export class ToolMissingError extends Schema.TaggedError<ToolMissingError>()(
+  "ToolMissingError",
+  { program: Schema.String },
+) {
+  override get message() {
+    return `${this.program} is not on PATH; rigging server needs ps and lsof (on Arch: pacman -S lsof)`;
+  }
+}
+
 export class StopTimeoutError extends Schema.TaggedError<StopTimeoutError>()(
   "StopTimeoutError",
   { name: Schema.String, group: Schema.Int },
@@ -282,6 +291,10 @@ const signal = (pid: number, name: NodeJS.Signals | 0) =>
 
 const groupAlive = (group: number) => signal(-group, 0);
 
+/**
+ * A command's output, or "" when it fails to run. A missing `ps` or `lsof` fails instead: read as
+ * "", it hides every listener, so `start` waits out its timeout for a port it cannot see.
+ */
 const output = Effect.fn("Server.output")(function* (
   program: string,
   args: readonly string[],
@@ -289,8 +302,20 @@ const output = Effect.fn("Server.output")(function* (
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* spawner
     .string(ChildProcess.make(program, args, { stdin: "ignore" }))
-    .pipe(Effect.orElseSucceed(() => ""));
+    .pipe(
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.fail(new ToolMissingError({ program }))
+          : Effect.succeed(""),
+      ),
+    );
 });
+
+/** Fails before `start` launches anything, which a lookup's failure mid-start would leave running. */
+const toolsPresent = Effect.all(
+  [output("ps", ["-p", String(process.pid)]), output("lsof", ["-v"])],
+  { discard: true },
+);
 
 const commandLine = Effect.fn("Server.commandLine")(function* (pid: number) {
   const text = yield* output("ps", ["-o", "command=", "-p", String(pid)]);
@@ -829,6 +854,7 @@ export const start = Effect.fn("Server.start")(function* (
   },
 ) {
   const { note, timeout } = options;
+  yield* toolsPresent;
   const record = yield* readRecord(root, name);
   if (Option.isSome(record)) {
     const now = yield* status(root, name);

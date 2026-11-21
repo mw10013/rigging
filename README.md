@@ -23,6 +23,8 @@ rigging stage up|check|wait|reset <stage>     # Cloudflare: Workers Builds deplo
 rigging logs show|follow|wait <stage>         # Cloudflare: a deployed stage's Worker logs
 ```
 
+`rigging server` needs `ps` and `lsof` on `PATH` (macOS has both; on Linux, install `lsof`). Without one, `start` fails with `ToolMissingError` before it launches anything.
+
 `rigging server` works on the nearest folder upward that holds a `package.json`, so each
 checkout, and each app in a monorepo, has its own servers. The runner writes each run to its
 own file, `.rigging/servers/<name>/runs/<startedAt>-<run>.log`. The file opens with the run's
