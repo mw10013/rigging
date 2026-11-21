@@ -1,6 +1,6 @@
 {
   "name": "rigging-workspace",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Builds, tests and publishes @mw10013/rigging from src/",
   "type": "module",

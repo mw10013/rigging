@@ -89,10 +89,12 @@ export const runningServer = (
  * The Playwright base config: specs in `test/e2e/` against the running server `server` (default
  * `e2e`), each run's results kept in `.test-results/e2e/<start time>/`. That directory holds
  * `results.json`, `report/` (`playwright show-report <dir>/report`) and `results/`, each failed
- * test's trace and error context. `results/.last-run.json` carries over, so `--last-failed` works.
+ * test's error context. `results/.last-run.json` carries over, so `--last-failed` works.
  * `results.json` is plain text, and the config unsets `NO_COLOR`, which Node warns about beside the
- * `FORCE_COLOR=1` Playwright gives its workers. On CI it forbids `.only`, retries twice and runs
- * one worker.
+ * `FORCE_COLOR=1` Playwright gives its workers. It runs two workers and records no traces: each
+ * worker drives its own Chromium, and Playwright's half the cores, with a trace of every test,
+ * overloads a laptop's CPU until specs time out, the more so with e2e runs in other worktrees. On
+ * CI it forbids `.only`, retries twice and runs one worker.
  */
 export const e2eConfig = ({
   root = process.cwd(),
@@ -121,11 +123,8 @@ export const e2eConfig = ({
     fullyParallel: true,
     forbidOnly: ci,
     retries: ci ? 2 : 0,
-    workers: ci ? 1 : undefined,
+    workers: ci ? 1 : 2,
     reporter,
-    use: {
-      baseURL: runningServer(server, root, start).localURL,
-      trace: "retain-on-failure" as const,
-    },
+    use: { baseURL: runningServer(server, root, start).localURL },
   };
 };
